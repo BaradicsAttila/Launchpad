@@ -4,7 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:Launch_Pad"
-        xmlns:titleBar="clr-namespace:Launch_Pad.View"
+        xmlns:view="clr-namespace:Launch_Pad.View"
         mc:Ignorable="d"
         WindowStyle="None"
         Title="MainWindow" Height="900" Width="1600">
@@ -16,7 +16,7 @@
 			<RowDefinition Height="30"/>
 			<RowDefinition/>
 		</Grid.RowDefinitions>
-		<titleBar:TitleBar Grid.Row="0" MouseLeftButtonDown="Window_MouseLeftButtonDown"/>
-    </Grid>
+		<view:TitleBar Grid.Row="0" MouseLeftButtonDown="Window_MouseLeftButtonDown"/>
+	</Grid>
 
 </Window>
