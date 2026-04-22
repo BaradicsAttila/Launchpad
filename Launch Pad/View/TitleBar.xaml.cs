@@ -14,36 +14,36 @@ namespace Launch_Pad.View
 		{
 			InitializeComponent();
 		}
-		private Window mainwindow(){
-			return Window.GetWindow(this);
-		}
+		//private Window mainwindow(){
+		//	return Window.GetWindow(this);
+		//}
 		
-		private void clsbtn_Click(object sender, RoutedEventArgs e)
-		{
-			Environment.Exit(0);
-		}
+		//private void clsbtn_Click(object sender, RoutedEventArgs e)
+		//{
+		//	Environment.Exit(0);
+		//}
 
 
-		private void maximbtn_Click(object sender, RoutedEventArgs e)
-        {
-			if (mainwindow().WindowState == WindowState.Normal)
-			{
-				maximbtn.Content = "";
-				mainwindow().WindowState = WindowState.Maximized;
+		//private void maximbtn_Click(object sender, RoutedEventArgs e)
+  //      {
+		//	if (mainwindow().WindowState == WindowState.Normal)
+		//	{
+		//		maximbtn.Content = "";
+		//		mainwindow().WindowState = WindowState.Maximized;
 
-			}
-			else
-			{
-				maximbtn.Content = "";
-				mainwindow().WindowState = WindowState.Normal;
+		//	}
+		//	else
+		//	{
+		//		maximbtn.Content = "";
+		//		mainwindow().WindowState = WindowState.Normal;
 
-			}
-		}
+		//	}
+		//}
 
-		private void minimbtn_Click(object sender, RoutedEventArgs e)
-        {
-			mainwindow().WindowState = WindowState.Minimized;
-        }
+		//private void minimbtn_Click(object sender, RoutedEventArgs e)
+  //      {
+		//	mainwindow().WindowState = WindowState.Minimized;
+  //      }
 
 
 	}
