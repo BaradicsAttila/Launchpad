@@ -14,13 +14,26 @@ namespace Launch_Pad.ViewModel
             Environment.Exit(0);
         }
 
-		public TiltlebarVM()
+        [RelayCommand]
+        private void maximbtn()
+        {
+
+        }
+
+        [RelayCommand]
+        private void minimbtn()
+        {
+            mainwindow?.WindowState = WindowState.Minimized;
+        }
+
+
+
+        public TiltlebarVM()
         {
             
             mainwindow = Application.Current?.MainWindow;
             if (mainwindow != null)
             {
-                // initialize backing field and keep in sync when the window state changes
                 _windowSt = mainwindow.WindowState;
                 mainwindow.StateChanged += Mainwindow_StateChanged;
             }
@@ -29,9 +42,16 @@ namespace Launch_Pad.ViewModel
         private void Mainwindow_StateChanged(object? sender, EventArgs e)
         {
             WindowSt = mainwindow?.WindowState ?? WindowState.Normal;
+            if (mainwindow?.WindowState==WindowState.Maximized)
+            {
+                
+            }
         }
 
         [ObservableProperty]
         private WindowState _windowSt;
+
+        [ObservableProperty]
+        private string _maximbtnContent;
     }
 }

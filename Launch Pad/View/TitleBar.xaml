@@ -13,7 +13,7 @@
     <UserControl.Resources>
         <Style TargetType="Button">
             <Setter Property="BorderThickness" Value="0"/>
-			<Setter Property="FontFamily" Value="Segoe Fluent Icons"/>
+            <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
 			<Setter Property="Width" Value="20"/>
             <Setter Property="Height" Value="20"/>
             <Setter Property="FontSize" Value="10"/>
@@ -76,7 +76,7 @@
             Name="maximbtn"
             Command="{Binding maximbtnCommand}"
             Grid.Column="4"
-            Content=""/>
+            Content="{Binding MaximbtnContent}"/>
 		<Button
             Name="minimbtn"
             Command="{Binding minimbtnCommand}"
