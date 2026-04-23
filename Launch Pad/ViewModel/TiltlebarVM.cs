@@ -11,8 +11,8 @@ namespace Launch_Pad.ViewModel
         [RelayCommand]
         private void clsbtn()
         {
-            Environment.Exit(0);
-        }
+			mainwindow?.Close();
+		}
 
         [RelayCommand]
         private void maximbtn()
@@ -66,7 +66,7 @@ namespace Launch_Pad.ViewModel
         [ObservableProperty]
         private WindowState _windowSt;
         [ObservableProperty]
-        private string _maximbtnContent;
+        private string _maximbtnContent = string.Empty;
 
     }
 }

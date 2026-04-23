@@ -7,7 +7,9 @@
         xmlns:view="clr-namespace:Launch_Pad.View"
         mc:Ignorable="d"
         WindowStyle="None"
-        Title="MainWindow" Height="900" Width="1600">
+        Title="MainWindow" Height="900" Width="1600"
+		MouseLeftButtonUp="Window_MouseLeftButtonUp"
+        MouseMove="Window_MouseMove">
 	<WindowChrome.WindowChrome>
 		<WindowChrome GlassFrameThickness="0" CornerRadius="0" CaptionHeight="0"/>
 	</WindowChrome.WindowChrome>
@@ -16,7 +18,9 @@
 			<RowDefinition Height="30"/>
 			<RowDefinition/>
 		</Grid.RowDefinitions>
-		<view:TitleBar Grid.Row="0" MouseLeftButtonDown="Window_MouseLeftButtonDown"/>
+		<view:TitleBar Grid.Row="0"
+                   MouseLeftButtonDown="Window_MouseLeftButtonDown"
+                   MouseDoubleClick="TitleBar_MouseDoubleClick"/>
 	</Grid>
 
 </Window>
