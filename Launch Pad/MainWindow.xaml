@@ -17,9 +17,10 @@
 			<RowDefinition Height="30"/>
 			<RowDefinition/>
 		</Grid.RowDefinitions>
-		<view:TitleBar Grid.Row="0"
-                   MouseLeftButtonDown="Window_MouseLeftButtonDown"
-                   MouseDoubleClick="TitleBar_MouseDoubleClick"/>
+		<view:TitleBar 
+			Grid.Row="0"
+            MouseLeftButtonDown="Window_MouseLeftButtonDown"
+            MouseDoubleClick="TitleBar_MouseDoubleClick"/>
 	</Grid>
 
 </Window>
