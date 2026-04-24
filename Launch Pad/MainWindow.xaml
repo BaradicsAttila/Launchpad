@@ -6,12 +6,11 @@
         xmlns:local="clr-namespace:Launch_Pad"
         xmlns:view="clr-namespace:Launch_Pad.View"
         mc:Ignorable="d"
-        WindowStyle="None"
         Title="MainWindow" Height="900" Width="1600"
 		MouseLeftButtonUp="Window_MouseLeftButtonUp"
         MouseMove="Window_MouseMove">
 	<WindowChrome.WindowChrome>
-		<WindowChrome GlassFrameThickness="0" CornerRadius="0" CaptionHeight="0"/>
+		<WindowChrome GlassFrameThickness="0" CaptionHeight="0"/>
 	</WindowChrome.WindowChrome>
 	<Grid Background="#1A1A1A">
 		<Grid.RowDefinitions>
