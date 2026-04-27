@@ -7,20 +7,20 @@
         xmlns:view="clr-namespace:Launch_Pad.View"
         mc:Ignorable="d"
         Title="MainWindow" Height="900" Width="1600"
-		MouseLeftButtonUp="Window_MouseLeftButtonUp"
-        MouseMove="Window_MouseMove">
+		Icon="/Images/Lp_Ikon.png"
+		MinWidth="365">
 	<WindowChrome.WindowChrome>
 		<WindowChrome GlassFrameThickness="0" CaptionHeight="0"/>
 	</WindowChrome.WindowChrome>
 	<Grid Background="#1A1A1A">
 		<Grid.RowDefinitions>
-			<RowDefinition Height="30"/>
+			<RowDefinition Height="70"/>
 			<RowDefinition/>
 		</Grid.RowDefinitions>
 		<view:TitleBar 
-			Grid.Row="0"
-            MouseLeftButtonDown="Window_MouseLeftButtonDown"
-            MouseDoubleClick="TitleBar_MouseDoubleClick"/>
+			Grid.Row="0"/>
+		<view:LeftMenu
+			Grid.Row="1"/>
 	</Grid>
 
 </Window>

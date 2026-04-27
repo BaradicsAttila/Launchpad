@@ -6,12 +6,12 @@
              xmlns:local="clr-namespace:Launch_Pad.View"
 			 xmlns:vm ="clr-namespace:Launch_Pad.ViewModel"
              mc:Ignorable="d" 
-             d:DesignHeight="30" d:DesignWidth="1920">
+             d:DesignHeight="70" d:DesignWidth="1920">
 	<UserControl.DataContext>
 		<vm:TiltlebarVM/>
 	</UserControl.DataContext>
     <UserControl.Resources>
-        <Style TargetType="Button">
+        <Style x:Key="BaseButtonStyle" TargetType="Button">
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
 			<Setter Property="Width" Value="20"/>
@@ -19,7 +19,9 @@
             <Setter Property="FontSize" Value="10"/>
             <Setter Property="Foreground" Value="#CCCCCC"/>
             <Setter Property="Background" Value="Transparent"/>
-            <Style.Triggers>
+			<Setter Property="VerticalAlignment" Value="Top"/>
+			<Setter Property="Margin" Value="0 10 0 0"/>
+			<Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
                     <Setter Property="Background" Value="#444444"/>
                     <Setter Property="Template">
@@ -34,14 +36,21 @@
                 </Trigger>
             </Style.Triggers>
         </Style>
+		<Style x:Key="NoHoverButtonStyle" BasedOn="{StaticResource BaseButtonStyle}" TargetType="Button">
+			<Style.Triggers>
+				<Trigger Property="IsMouseOver" Value="True">
+					<Setter Property="Background" Value="Transparent"/>
+				</Trigger>
+			</Style.Triggers>
+		</Style>
 
-    </UserControl.Resources>
-	<Grid>
+	</UserControl.Resources>
+	<Grid Background="#141419">
 		<Grid.ColumnDefinitions>
-			<!--<ColumnDefinition 
-				Width="30"/>
-			<ColumnDefinition 
-				Width="100"/>-->
+			<ColumnDefinition Width="20"/>
+			<ColumnDefinition Width="40"/>
+			<ColumnDefinition Width="15"/>
+			<ColumnDefinition Width="200"/>
 			<ColumnDefinition
 				Width="1*"/>
 			<ColumnDefinition 
@@ -52,35 +61,62 @@
 				Width="30"/>
 		</Grid.ColumnDefinitions>
 
-		<!--<Image 
+		<Rectangle
 			Grid.Column="0"
+			Grid.ColumnSpan="4"
+			Fill="#111116"/>
+
+		<Button
+			Style="{StaticResource NoHoverButtonStyle}"
+			Width="auto"
+			Height="30"
+			Panel.ZIndex="1"
+			PreviewMouseLeftButtonDown="Window_MouseLeftButtonDown"
+			PreviewMouseMove="Window_MouseMove"
+			MouseDoubleClick="TitleBar_MouseDoubleClick"
+			PreviewMouseLeftButtonUp="Window_MouseLeftButtonUp"
+			VerticalAlignment="Top"
+			Margin="0 0 0 0"
+			Grid.ColumnSpan="8"/>
+
+		<Image
+			Margin="0 20 0 0"
+			Grid.Column="1"
+			VerticalAlignment="Top"
+			HorizontalAlignment="Left"
 			Source="pack://application:,,,/Images/Lp_Ikon.png" 
-			Height="20" 
-			Width="20"/>
-		<TextBlock 
-			Grid.Column="1" 
-			Text="Launchpad" 
-			VerticalAlignment="Center" 
+			Height="40" 
+			Width="40"/>
+		<TextBlock
+			Margin="0 20 0 0"
+			Grid.Column="3"
+			Text="LaunchPad" 
 			Foreground="#cccccc" 
-			FontSize="20" 
-			FontWeight="Light"/>-->
+			FontSize="30"/>
+
 		<Rectangle 
-			Grid.Column="0" 
+			Grid.Column="4" 
 			Fill="Transparent"/>
         <Button
+			Style="{StaticResource BaseButtonStyle}"
+			Panel.ZIndex="2"
 			Name="clsbtn"
 			Command="{Binding clsbtnCommand}"
-			Grid.Column="3"
+			Grid.Column="7"
 			Content=""/>
 		<Button
+			Style="{StaticResource BaseButtonStyle}"
+			Panel.ZIndex="2"
             Name="maximbtn"
             Command="{Binding maximbtnCommand}"
-            Grid.Column="2"
+            Grid.Column="6"
             Content="{Binding MaximbtnContent}"/>
 		<Button
+			Style="{StaticResource BaseButtonStyle}"
+			Panel.ZIndex="2"
             Name="minimbtn"
             Command="{Binding minimbtnCommand}"
-            Grid.Column="1"
+            Grid.Column="5"
             Content=""/>
     </Grid>
 </UserControl>
