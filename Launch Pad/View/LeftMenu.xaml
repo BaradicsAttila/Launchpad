@@ -5,7 +5,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:local="clr-namespace:Launch_Pad.View"
              mc:Ignorable="d" 
-             d:DesignHeight="900" d:DesignWidth="200">
+             d:DesignHeight="900" d:DesignWidth="275">
     <Grid>
 		<Grid.RowDefinitions>
 			<RowDefinition Height="100"/>

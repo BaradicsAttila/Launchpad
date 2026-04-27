@@ -10,7 +10,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Launch_Pad.View
 {
-    public partial class TitleBar : UserControl
+    public partial class TitleBar : UserControl 
     {
         public TitleBar()
         {
