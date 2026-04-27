@@ -5,7 +5,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
 
-namespace Launch_Pad
+namespace LaunchPad
 {
 	public partial class MainWindow : Window
 	{

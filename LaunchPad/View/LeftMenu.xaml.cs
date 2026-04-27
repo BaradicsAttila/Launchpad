@@ -11,7 +11,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
 
-namespace Launch_Pad.View
+namespace LaunchPad.View
 {
     /// <summary>
     /// Interaction logic for LeftMenu.xaml

@@ -3,7 +3,7 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
-namespace Launch_Pad.ViewModel
+namespace LaunchPad.ViewModel
 {
     public partial class TiltlebarVM : ObservableObject
     {

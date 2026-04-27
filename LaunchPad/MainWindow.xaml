@@ -1,10 +1,10 @@
-﻿<Window x:Class="Launch_Pad.MainWindow"
+﻿<Window x:Class="LaunchPad.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:Launch_Pad"
-        xmlns:view="clr-namespace:Launch_Pad.View"
+        xmlns:local="clr-namespace:LaunchPad"
+        xmlns:view="clr-namespace:LaunchPad.View"
         mc:Ignorable="d"
         Title="MainWindow" Height="900" Width="1600"
 		Icon="/Images/Lp_Ikon.png"
@@ -24,8 +24,7 @@
 				<ColumnDefinition Width="275"/>
 				<ColumnDefinition/>
 			</Grid.ColumnDefinitions>
-			<view:LeftMenu
-				Grid.Row="1"/>
+			<view:LeftMenu/>
 		</Grid>
 	</Grid>
 
