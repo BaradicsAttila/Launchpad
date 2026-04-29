@@ -21,6 +21,28 @@
 				<RowDefinition/>
 				<RowDefinition/> 
 			</Grid.RowDefinitions>
+			<!--<Border>
+				<TextBlock/>
+			</Border>
+			<Border>
+				<TextBlock/>
+			</Border>
+			<Border>
+				<TextBlock/>
+			</Border>
+			<Border>
+				<TextBlock/>
+			</Border>
+			<Border>
+				<TextBlock/>
+			</Border>-->
+			<StackPanel >
+				<Border>
+					<Button>
+						<TextBlock Text="$    Home"/>
+					</Button>
+				</Border>
+			</StackPanel>
 		</Grid>
 	</Grid>
 </UserControl>

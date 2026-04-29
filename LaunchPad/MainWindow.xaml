@@ -7,7 +7,7 @@
         xmlns:view="clr-namespace:LaunchPad.View"
         mc:Ignorable="d"
         Title="MainWindow" Height="900" Width="1600"
-		Icon="/Images/Lp_Ikon.png"
+		Icon="/Resources/Images/Lp_Ikon.png"
 		MinWidth="365">
 	<WindowChrome.WindowChrome>
 		<WindowChrome GlassFrameThickness="0" CaptionHeight="0"/>

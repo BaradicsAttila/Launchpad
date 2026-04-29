@@ -5,7 +5,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace LaunchPad.ViewModel
 {
-    public partial class TiltlebarVM : ObservableObject
+    public partial class TitlebarVM : ObservableObject
     {
         private Window? mainwindow;
         [RelayCommand]
@@ -46,7 +46,7 @@ namespace LaunchPad.ViewModel
             }
         }
 
-        public TiltlebarVM()
+        public TitlebarVM()
         {
             mainwindow = Application.Current?.MainWindow;
             if (mainwindow != null)

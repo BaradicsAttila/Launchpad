@@ -8,9 +8,9 @@
              mc:Ignorable="d" 
              d:DesignHeight="70" d:DesignWidth="1920">
 	<UserControl.DataContext>
-		<vm:TiltlebarVM/>
+		<vm:TitlebarVM/>
 	</UserControl.DataContext>
-    <UserControl.Resources>
+	<UserControl.Resources>
         <Style x:Key="BaseButtonStyle" TargetType="Button">
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
@@ -83,7 +83,7 @@
 			Grid.Column="1"
 			VerticalAlignment="Top"
 			HorizontalAlignment="Left"
-			Source="pack://application:,,,/Images/Lp_Ikon.png" 
+			Source="pack://application:,,,/Resources/Images/Lp_Ikon.png"
 			Height="40" 
 			Width="40"/>
 		<TextBlock
