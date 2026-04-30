@@ -21,7 +21,7 @@
 						</Border>
 						<ControlTemplate.Triggers>
 							<Trigger Property="IsChecked" Value="True">
-								<Setter TargetName="BorderBg" Property="Background" Value="#808A2BE2"/>
+								<Setter TargetName="BorderBg" Property="Background" Value="#408A2BE2"/>
 							</Trigger>
 						</ControlTemplate.Triggers>
 					</ControlTemplate>
@@ -33,6 +33,7 @@
 			<Style.Triggers>
 				<DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=RadioButton}}" Value="True">
 					<Setter Property="FontFamily" Value="{StaticResource IconsFill}"/>
+					<Setter Property="Foreground" Value="#8A6BE2"/>
 				</DataTrigger>
 			</Style.Triggers>
 		</Style>
