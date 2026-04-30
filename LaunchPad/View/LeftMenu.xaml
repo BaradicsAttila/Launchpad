@@ -4,45 +4,62 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:local="clr-namespace:LaunchPad.View"
+			 xmlns:vm ="clr-namespace:LaunchPad.ViewModel"
              mc:Ignorable="d" 
-             d:DesignHeight="900" d:DesignWidth="275">
-    <Grid>
+             d:DesignHeight="900" d:DesignWidth="235">
+
+	<UserControl.Resources>
+		<Style TargetType="RadioButton">
+			<Setter Property="FontSize" Value="20"/>
+			<Setter Property="Margin" Value="20 10 20 0"/>
+			<Setter Property="Foreground" Value="#CCCCCC"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="RadioButton">
+						<Border x:Name="BorderBg" Background="Transparent" CornerRadius="10">
+							<ContentPresenter Margin="10 10"/>
+						</Border>
+						<ControlTemplate.Triggers>
+							<Trigger Property="IsChecked" Value="True">
+								<Setter TargetName="BorderBg" Property="Background" Value="#808A2BE2"/>
+							</Trigger>
+						</ControlTemplate.Triggers>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+		<Style x:Key="Icons" TargetType="Run">
+			<Setter Property="FontFamily" Value="{StaticResource IconsDef}"/>
+			<Style.Triggers>
+				<DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=RadioButton}}" Value="True">
+					<Setter Property="FontFamily" Value="{StaticResource IconsFill}"/>
+				</DataTrigger>
+			</Style.Triggers>
+		</Style>
+	</UserControl.Resources>
+	<Grid Background="#111119">
 		<Grid.RowDefinitions>
-			<RowDefinition/>
+			<RowDefinition Height="400"/>
 			<RowDefinition/>
 			<RowDefinition/>
 		</Grid.RowDefinitions>
-		<Grid>
-			<Grid.RowDefinitions>
-				<RowDefinition/>
-				<RowDefinition/>
-				<RowDefinition/>
-				<RowDefinition/>
-				<RowDefinition/>
-				<RowDefinition/> 
-			</Grid.RowDefinitions>
-			<!--<Border>
-				<TextBlock/>
-			</Border>
-			<Border>
-				<TextBlock/>
-			</Border>
-			<Border>
-				<TextBlock/>
-			</Border>
-			<Border>
-				<TextBlock/>
-			</Border>
-			<Border>
-				<TextBlock/>
-			</Border>-->
-			<StackPanel >
-				<Border>
-					<Button>
-						<TextBlock Text="$    Home"/>
-					</Button>
-				</Border>
-			</StackPanel>
-		</Grid>
+		<Rectangle Width="auto" Height="1px" Fill="#CCCCCC" VerticalAlignment="Top" Opacity="0.1"/>
+		<StackPanel >
+				<RadioButton x:Name="RBHome" GroupName="Menu" IsChecked="{Binding IsHomeSelected, Mode=TwoWay}">
+					<TextBlock> <Run Style="{StaticResource Icons}"></Run> <Run></Run> Home</TextBlock>
+				</RadioButton>
+				<RadioButton x:Name="RBLibrary" GroupName="Menu" IsChecked="{Binding IsLibrarySelected, Mode=TwoWay}">
+					<TextBlock> <Run Style="{StaticResource Icons}"></Run> <Run></Run> Library</TextBlock>
+				</RadioButton>
+				<RadioButton x:Name="RBStatistics" GroupName="Menu" IsChecked="{Binding IsStatisticsSelected, Mode=TwoWay}">
+					<TextBlock> <Run Style="{StaticResource Icons}"></Run> <Run></Run> Statistics</TextBlock>
+				</RadioButton>
+				<RadioButton x:Name="RBMacros" GroupName="Menu" IsChecked="{Binding IsMacrosSelected, Mode=TwoWay}">
+					<TextBlock> <Run Style="{StaticResource Icons}"></Run> <Run></Run> Macros</TextBlock>
+				</RadioButton>
+				<RadioButton x:Name="RBSettings" GroupName="Menu" IsChecked="{Binding IsSettingsSelected, Mode=TwoWay}">
+					<TextBlock> <Run Style="{StaticResource Icons}"></Run> <Run></Run> Settings</TextBlock>
+				</RadioButton>
+		</StackPanel>
 	</Grid>
 </UserControl>

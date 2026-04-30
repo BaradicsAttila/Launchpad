@@ -66,7 +66,7 @@ namespace LaunchPad.ViewModel
         [ObservableProperty]
         private WindowState _windowSt;
         [ObservableProperty]
-        private string _maximbtnContent = string.Empty;
+        private string _maximbtnContent = "";
 
-    }
+	}
 }

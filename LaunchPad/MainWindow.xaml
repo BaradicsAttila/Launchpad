@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:LaunchPad"
         xmlns:view="clr-namespace:LaunchPad.View"
+		xmlns:vm ="clr-namespace:LaunchPad.ViewModel"
         mc:Ignorable="d"
         Title="MainWindow" Height="900" Width="1600"
 		Icon="/Resources/Images/Lp_Ikon.png"
@@ -12,19 +13,23 @@
 	<WindowChrome.WindowChrome>
 		<WindowChrome GlassFrameThickness="0" CaptionHeight="0"/>
 	</WindowChrome.WindowChrome>
+	<Window.DataContext>
+		<vm:MainPageVM/>
+	</Window.DataContext>
 	<Grid Background="#1A1A1A">
 		<Grid.RowDefinitions>
-			<RowDefinition Height="70"/>
+			<RowDefinition Height="45"/>
 			<RowDefinition/>
 		</Grid.RowDefinitions>
 		<view:TitleBar 
 			Grid.Row="0"/>
 		<Grid Grid.Row="1">
 			<Grid.ColumnDefinitions>
-				<ColumnDefinition Width="275"/>
+				<ColumnDefinition Width="235"/>
 				<ColumnDefinition/>
 			</Grid.ColumnDefinitions>
 			<view:LeftMenu/>
+			<ContentControl Grid.Column="1" Content="{Binding CurrentPage}"/>
 		</Grid>
 	</Grid>
 

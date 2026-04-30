@@ -6,7 +6,7 @@
              xmlns:local="clr-namespace:LaunchPad.View"
 			 xmlns:vm ="clr-namespace:LaunchPad.ViewModel"
              mc:Ignorable="d" 
-             d:DesignHeight="70" d:DesignWidth="1920">
+             d:DesignHeight="45" d:DesignWidth="1920">
 	<UserControl.DataContext>
 		<vm:TitlebarVM/>
 	</UserControl.DataContext>
@@ -49,7 +49,7 @@
 			<ColumnDefinition Width="20"/>
 			<ColumnDefinition Width="40"/>
 			<ColumnDefinition Width="15"/>
-			<ColumnDefinition Width="200"/>
+			<ColumnDefinition Width="160"/>
 			<ColumnDefinition
 				Width="1*"/>
 			<ColumnDefinition 
@@ -63,7 +63,7 @@
 		<Rectangle
 			Grid.Column="0"
 			Grid.ColumnSpan="4"
-			Fill="#111116"/>
+			Fill="#111119"/>
 
 		<Button
 			Style="{StaticResource NoHoverButtonStyle}"
@@ -79,19 +79,19 @@
 			Grid.ColumnSpan="8"/>
 
 		<Image
-			Margin="0 15 0 0"
+			Margin="0 5 0 0"
 			Grid.Column="1"
 			VerticalAlignment="Top"
 			HorizontalAlignment="Left"
 			Source="pack://application:,,,/Resources/Images/Lp_Ikon.png"
-			Height="40" 
-			Width="40"/>
+			Height="35" 
+			Width="35"/>
 		<TextBlock
-			Margin="0 15 0 0"
+			Margin="0 3 0 0"
 			Grid.Column="3"
 			Text="LaunchPad" 
 			Foreground="#cccccc" 
-			FontSize="30"/>
+			FontSize="25"/>
 
 		<Rectangle 
 			Grid.Column="4" 

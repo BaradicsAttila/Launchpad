@@ -10,6 +10,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Remove="Resources\Fonts\Phosphor\fill\Phosphor-Fill.ttf" />
+    <None Remove="Resources\Fonts\Phosphor\regular\Phosphor.ttf" />
     <None Remove="Resources\Images\Lp_Ikon.png" />
   </ItemGroup>
 
@@ -22,6 +24,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Resource Include="Resources\Fonts\Phosphor\fill\Phosphor-Fill.ttf">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Resources\Fonts\Phosphor\regular\Phosphor.ttf">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Resource>
     <Resource Include="Resources\Images\Lp_Ikon.png">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Resource>
