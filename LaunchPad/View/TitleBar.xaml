@@ -48,7 +48,7 @@
 		<Grid.ColumnDefinitions>
 			<ColumnDefinition Width="20"/>
 			<ColumnDefinition Width="40"/>
-			<ColumnDefinition Width="15"/>
+			<ColumnDefinition Width="5"/>
 			<ColumnDefinition Width="160"/>
 			<ColumnDefinition
 				Width="1*"/>
@@ -68,7 +68,7 @@
 		<Button
 			Style="{StaticResource NoHoverButtonStyle}"
 			Width="auto"
-			Height="30"
+			Height="45"
 			Panel.ZIndex="1"
 			PreviewMouseLeftButtonDown="Window_MouseLeftButtonDown"
 			PreviewMouseMove="Window_MouseMove"
