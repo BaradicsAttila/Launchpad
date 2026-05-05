@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Text;
 using System.Windows.Controls;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -22,6 +23,7 @@ namespace LaunchPad.ViewModel
         [ObservableProperty]
         private bool _isSettingsSelected;
 
+		public ObservableCollection<object> _quickLaunchList = new ObservableCollection<object>();
 		partial void OnIsHomeSelectedChanged(bool value)
 		{
 			if (value)

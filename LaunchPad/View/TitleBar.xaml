@@ -49,7 +49,7 @@
 			<ColumnDefinition Width="20"/>
 			<ColumnDefinition Width="40"/>
 			<ColumnDefinition Width="5"/>
-			<ColumnDefinition Width="160"/>
+			<ColumnDefinition Width="170"/>
 			<ColumnDefinition
 				Width="1*"/>
 			<ColumnDefinition 
