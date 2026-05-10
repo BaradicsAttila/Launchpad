@@ -13,6 +13,7 @@
     <None Remove="Resources\Fonts\Phosphor\fill\Phosphor-Fill.ttf" />
     <None Remove="Resources\Fonts\Phosphor\regular\Phosphor.ttf" />
     <None Remove="Resources\Images\Lp_Ikon.png" />
+    <None Remove="Resources\Images\Preview.jpg" />
   </ItemGroup>
 
   <ItemGroup>
@@ -33,6 +34,7 @@
     <Resource Include="Resources\Images\Lp_Ikon.png">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Resource>
+    <Resource Include="Resources\Images\Preview.jpg" />
   </ItemGroup>
 
 </Project>

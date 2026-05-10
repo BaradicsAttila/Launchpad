@@ -5,8 +5,68 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:local="clr-namespace:LaunchPad.View"
              mc:Ignorable="d" 
-             d:DesignHeight="450" d:DesignWidth="800">
-    <Grid>
-		<Rectangle Fill="Red"/>
+             d:DesignHeight="900" d:DesignWidth="1365">
+	<UserControl.Resources>
+		<Style x:Key="PlayButtonStyle" TargetType="Button">
+			<Setter Property="BorderThickness" Value="0"/>
+			<Setter Property="Width" Value="200"/>
+			<Setter Property="Height" Value="35"/>
+			<Setter Property="FontSize" Value="20"/>
+			<Setter Property="Foreground" Value="#CCCCCC"/>
+			<Setter Property="Background" Value="Transparent"/>
+			<Style.Triggers>
+				<Trigger Property="IsMouseOver" Value="True">
+					<Setter Property="Background" Value="Transparent"/>
+					<Setter Property="Template">
+						<Setter.Value>
+							<ControlTemplate TargetType="{x:Type Button}">
+								<Border Background="{TemplateBinding Background}">
+									<ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+								</Border>
+							</ControlTemplate>
+						</Setter.Value>
+					</Setter>
+				</Trigger>
+			</Style.Triggers>
+		</Style>
+		<Style x:Key="favoritblocks" TargetType="StackPanel">
+			
+		</Style>
+	</UserControl.Resources>
+	<Grid Margin="20">
+		<Grid.RowDefinitions>
+			<RowDefinition Height="50*"/>
+			<RowDefinition Height="50*"/>
+		</Grid.RowDefinitions>
+		<Border Background="#1D1D1D" CornerRadius="5">
+			<StackPanel>
+				<StackPanel.Resources>
+					<Style TargetType="Image">
+						<Setter Property="Stretch" Value="Fill"/>
+					</Style>
+				</StackPanel.Resources>
+				<Grid Margin="10">
+					<TextBlock Text="Favourites" Foreground="#CCCCCC" FontSize="22"/>
+					<TextBlock Text="View All" Foreground="#8A6BE2" FontSize="14" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+				</Grid>
+				<StackPanel Orientation="Horizontal">
+					<Border Margin="10 0 10 0" Padding="5" Width="230" CornerRadius="5" Background="#1A1A1A" BorderThickness="1" BorderBrush="#222222">
+						<StackPanel>
+							<Image Source="/Resources/Images/Preview.jpg"/>
+							<Label Content="Game Name" Foreground="#CCCCCC" FontSize="14"/>
+							<Label Content="Played {0} ago" Foreground="#999999" FontSize="10"/>
+							<Border CornerRadius="5" Background="#5A3BB2">
+								<Button Style="{StaticResource PlayButtonStyle}">
+									<StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+										<TextBlock Text="" FontFamily="{StaticResource IconsFill}" VerticalAlignment="Center"/>
+										<TextBlock Text=" Play"/>
+									</StackPanel>
+								</Button>
+							</Border>
+						</StackPanel>
+					</Border>
+				</StackPanel>
+			</StackPanel>
+		</Border>
 	</Grid>
 </UserControl>
