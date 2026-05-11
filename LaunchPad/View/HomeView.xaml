@@ -38,7 +38,7 @@
 			<RowDefinition Height="50*"/>
 			<RowDefinition Height="50*"/>
 		</Grid.RowDefinitions>
-		<Border Background="#1D1D1D" CornerRadius="5">
+		<Border Background="#1F1F1F" CornerRadius="5">
 			<StackPanel>
 				<StackPanel.Resources>
 					<Style TargetType="Image">
@@ -46,10 +46,10 @@
 					</Style>
 				</StackPanel.Resources>
 				<Grid Margin="10">
-					<TextBlock Text="Favourites" Foreground="#CCCCCC" FontSize="22"/>
+					<TextBlock Text=" Favourites" Foreground="#CCCCCC" FontSize="22"/>
 					<TextBlock Text="View All" Foreground="#8A6BE2" FontSize="14" HorizontalAlignment="Right" VerticalAlignment="Center"/>
 				</Grid>
-				<StackPanel Orientation="Horizontal">
+				<StackPanel Name="FavouritesDisplay" Orientation="Horizontal">
 					<Border Margin="10 0 10 0" Padding="5" Width="230" CornerRadius="5" Background="#1A1A1A" BorderThickness="1" BorderBrush="#222222">
 						<StackPanel>
 							<Image Source="/Resources/Images/Preview.jpg"/>
