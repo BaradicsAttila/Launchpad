@@ -1,0 +1,134 @@
+[
+  {
+    "name": "Hollow Knight",
+    "iconSource": "icons/hollow_knight.png",
+    "isFavourite": true,
+    "playtimeMinutes": 3240,
+    "lastPlayedHours": 5,
+    "launchCount": 47,
+    "isGame": true,
+    "source": "Steam",
+    "isDeleted": false
+  },
+  {
+    "name": "Celeste",
+    "iconSource": "icons/celeste.png",
+    "isFavourite": false,
+    "playtimeMinutes": 860,
+    "lastPlayedHours": 120,
+    "launchCount": 12,
+    "isGame": true,
+    "source": "GOG",
+    "isDeleted": false
+  },
+  {
+    "name": "Hades",
+    "iconSource": "icons/hades.png",
+    "isFavourite": true,
+    "playtimeMinutes": 5120,
+    "lastPlayedHours": 12,
+    "launchCount": 83,
+    "isGame": true,
+    "source": "Steam",
+    "isDeleted": false
+  },
+  {
+    "name": "Stardew Valley",
+    "iconSource": "icons/stardew_valley.png",
+    "isFavourite": true,
+    "playtimeMinutes": 7200,
+    "lastPlayedHours": 48,
+    "launchCount": 120,
+    "isGame": true,
+    "source": "Steam",
+    "isDeleted": false
+  },
+  {
+    "name": "Cyberpunk 2077",
+    "iconSource": "icons/cyberpunk_2077.png",
+    "isFavourite": false,
+    "playtimeMinutes": 2400,
+    "lastPlayedHours": 300,
+    "launchCount": 15,
+    "isGame": true,
+    "source": "GOG",
+    "isDeleted": false
+  },
+  {
+    "name": "Dark Souls III",
+    "iconSource": "icons/dark_souls_3.png",
+    "isFavourite": true,
+    "playtimeMinutes": 4800,
+    "lastPlayedHours": 72,
+    "launchCount": 34,
+    "isGame": true,
+    "source": "Steam",
+    "isDeleted": false
+  },
+  {
+    "name": "Portal 2",
+    "iconSource": "icons/portal_2.png",
+    "isFavourite": true,
+    "playtimeMinutes": 960,
+    "lastPlayedHours": 2160,
+    "launchCount": 8,
+    "isGame": true,
+    "source": "Steam",
+    "isDeleted": false
+  },
+  {
+    "name": "The Witcher 3",
+    "iconSource": "icons/witcher_3.png",
+    "isFavourite": true,
+    "playtimeMinutes": 10800,
+    "lastPlayedHours": 168,
+    "launchCount": 27,
+    "isGame": true,
+    "source": "GOG",
+    "isDeleted": false
+  },
+  {
+    "name": "Factorio",
+    "iconSource": "icons/factorio.png",
+    "isFavourite": false,
+    "playtimeMinutes": 3600,
+    "lastPlayedHours": 96,
+    "launchCount": 41,
+    "isGame": true,
+    "source": "Steam",
+    "isDeleted": false
+  },
+  {
+    "name": "Disco Elysium",
+    "iconSource": "icons/disco_elysium.png",
+    "isFavourite": false,
+    "playtimeMinutes": 1800,
+    "lastPlayedHours": 500,
+    "launchCount": 3,
+    "isGame": true,
+    "source": "Steam",
+    "isDeleted": true
+  },
+  {
+    "name": "Minecraft",
+    "iconSource": "icons/minecraft.png",
+    "isFavourite": true,
+    "playtimeMinutes": 14400,
+    "lastPlayedHours": 24,
+    "launchCount": 310,
+    "isGame": true,
+    "source": "Launcher",
+    "isDeleted": false
+  },
+  {
+    "name": "Terraria",
+    "iconSource": "icons/terraria.png",
+    "isFavourite": false,
+    "playtimeMinutes": 2760,
+    "lastPlayedHours": 720,
+    "launchCount": 56,
+    "isGame": true,
+    "source": "Steam",
+    "isDeleted": false
+  }
+]
