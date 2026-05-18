@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using System.Linq;
+using System.Windows.Media;
 
 namespace LaunchPad.Model
 {
@@ -27,6 +28,16 @@ namespace LaunchPad.Model
         public DateTime? LastPlayedUtc => Sessions.Any()
             ? Sessions.Max(s => s.EndedAt)
             : null;
+		//public DateTime? LastPlayedUtc
+		//{
+		//	get
+		//	{
+		//		if (Sessions.Any())
+		//			return Sessions.Max(s => s.EndedAt);
+		//		else
+		//			return null;
+		//	}
+		//}
         [JsonIgnore]
         public string LastPlayedFormatted
         { 
@@ -58,16 +69,66 @@ namespace LaunchPad.Model
                 return (int)Sessions.Average(s => s.DurationSeconds);
             }
         }
-		//public DateTime? LastPlayedUtc
-		//{
-		//	get
-		//	{
-		//		if (Sessions.Any())
-		//			return Sessions.Max(s => s.EndedAt);
-		//		else
-		//			return null;
-		//	}
-		//}
-
+        [JsonIgnore]
+        public int Last24hPlaytimeSeconds
+		{
+			get
+			{
+				if (!Sessions.Any()) return 0;
+				DateTime lastday = DateTime.UtcNow.AddDays(-1);
+                return Sessions
+                    .Where(s => s.EndedAt >= lastday)
+                    .Sum(s => s.DurationSeconds);
+			}
+		}
+        [JsonIgnore]
+        public int LastWeekPlaytimeSeconds
+		{
+			get
+			{
+				if (!Sessions.Any()) return 0;
+				DateTime lastweek = DateTime.UtcNow.AddDays(-7);
+                return Sessions
+                    .Where(s => s.EndedAt >= lastweek)
+                    .Sum(s => s.DurationSeconds);
+			}
+		}
+        [JsonIgnore]
+        public int LastMonthPlaytimeSeconds
+		{
+			get
+			{
+				if (!Sessions.Any()) return 0;
+				DateTime lastmonth = DateTime.UtcNow.AddMonths(-1);
+                return Sessions
+                    .Where(s => s.EndedAt >= lastmonth)
+                    .Sum(s => s.DurationSeconds);
+			}
+		}
+        [JsonIgnore]
+        public int LastYearPlaytimeSeconds
+		{
+			get
+			{
+				if (!Sessions.Any()) return 0;
+				DateTime lastyear = DateTime.UtcNow.AddYears(-1);
+                return Sessions
+                    .Where(s => s.EndedAt >= lastyear)
+                    .Sum(s => s.DurationSeconds);
+			}
+		}
+        [JsonIgnore]
+        public bool IsGame => DetermineIsGame(Source);
+        [JsonIgnore]
+        public ImageSource? Icon => ExtractionIcon(Source);
+        [JsonIgnore]
+        public Session? ActiveSession { get; private set; }
+        private static bool DetermineIsGame(string? exepath){ return default; }
+        private static ImageSource? ExtractionIcon(string? exepath) { return null; }
+		partial void OnSourceChanged(string value)
+		{
+			OnPropertyChanged(nameof(Icon));
+            OnPropertyChanged(nameof(IsGame));
+		}
 	}
 }
