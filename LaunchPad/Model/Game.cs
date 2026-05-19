@@ -1,11 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using CommunityToolkit.Mvvm.ComponentModel;
-using System.Linq;
+using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace LaunchPad.Model
 {
@@ -14,11 +17,11 @@ namespace LaunchPad.Model
         public string Name { get; init; }
 
         [ObservableProperty]
-        private string _source;
+        private string source;
         [ObservableProperty]
-        private bool _isFavourite;
+        private bool isFavourite;
         [ObservableProperty]
-        private bool _isDeleted;
+        private bool isDeleted;
         public List<Session> Sessions { get; set; } = new();
         [JsonIgnore]
         public int TotalPlaytimeSeconds => Sessions.Sum(s => s.DurationSeconds);
@@ -118,17 +121,94 @@ namespace LaunchPad.Model
 			}
 		}
         [JsonIgnore]
-        public bool IsGame => DetermineIsGame(Source);
+        public bool? IsGame => DetermineIsGame(Source);
         [JsonIgnore]
-        public ImageSource? Icon => ExtractionIcon(Source);
+        public ImageSource? Icon => ExtractIcon(Source);
         [JsonIgnore]
         public Session? ActiveSession { get; private set; }
-        private static bool DetermineIsGame(string? exepath){ return default; }
-        private static ImageSource? ExtractionIcon(string? exepath) { return null; }
 		partial void OnSourceChanged(string value)
 		{
 			OnPropertyChanged(nameof(Icon));
             OnPropertyChanged(nameof(IsGame));
 		}
+        public void StartSession(){
+            var session = new Session
+            {
+                StartedAt = DateTime.UtcNow,
+                EndedAt = DateTime.UtcNow,
+            };
+            Sessions.Add(session);
+            ActiveSession = session;
+            RefreshDerivedProperties();
+        }
+        public void EndSession(){
+            if (ActiveSession == null) return;
+            ActiveSession.EndedAt = DateTime.UtcNow;
+            ActiveSession = null;
+            RefreshDerivedProperties();
+        }
+        public void backupsession()
+        {
+            if (ActiveSession == null) return;
+            ActiveSession.EndedAt = DateTime.UtcNow;
+            RefreshDerivedProperties();
+        }
+        private void RefreshDerivedProperties()
+        {
+            OnPropertyChanged(nameof(TotalPlaytimeSeconds));
+            OnPropertyChanged(nameof(LaunchCount));
+            OnPropertyChanged(nameof(LastPlayedUtc));
+            OnPropertyChanged(nameof(LastPlayedFormatted));
+            OnPropertyChanged(nameof(AverageSessionSeconds));
+            OnPropertyChanged(nameof(Last24hPlaytimeSeconds));
+            OnPropertyChanged(nameof(LastWeekPlaytimeSeconds));
+            OnPropertyChanged(nameof(LastMonthPlaytimeSeconds));
+            OnPropertyChanged(nameof(LastYearPlaytimeSeconds));
+        }
+		private static readonly string[] GamePlatformPaths = new[]
+	    {
+		    "steam", "steamapps", "epic games", "epicgames",
+		    "ubisoft", "uplay", "origin", "ea games", "ea desktop",
+		    "gog galaxy", "gog.com", "battle.net", "battlenet",
+		    "rockstar games", "riot games", "2k games", "blizzard"
+	    };
+
+		private static bool? DetermineIsGame(string? exepath)
+        {
+            if (string.IsNullOrEmpty(exepath)) return null;
+            string lower = exepath.ToLowerInvariant();
+            return GamePlatformPaths.Any(p => lower.Contains(p));
+			
+				
+			
+		}
+		private static ImageSource? ExtractIcon(string? exePath)
+		{
+			if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
+				return null;
+
+			try
+			{
+				using var icon = System.Drawing.Icon.ExtractAssociatedIcon(exePath);
+				if (icon == null) return null;
+
+				return Imaging.CreateBitmapSourceFromHIcon(
+					icon.Handle,
+					System.Windows.Int32Rect.Empty,
+					BitmapSizeOptions.FromEmptyOptions());
+			}
+			catch { return null; }
+		}
+        [JsonConstructor]
+        public Game(string name, string source, bool isFavourite, bool isDeleted, List<Session>? sessions)
+        {
+            Name = name;
+            this.source = source;
+            this.isFavourite = isFavourite;
+            this.isDeleted = isDeleted;
+            Sessions = sessions ?? new List<Session>();
+        }
+
+
 	}
 }
