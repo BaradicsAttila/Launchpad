@@ -54,7 +54,7 @@
 						<StackPanel>
 							<Image Source="/Resources/Images/Preview.jpg"/>
 							<Label Content="Game Name" Foreground="#CCCCCC" FontSize="14"/>
-							<Label Content="Played {0} ago" Foreground="#999999" FontSize="10"/>
+							<Label Content="Played {0} ago" Foreground="#CCCCCC" FontWeight="ExtraLight" FontSize="10"/>
 							<Border CornerRadius="5" Background="#5A3BB2">
 								<Button Style="{StaticResource PlayButtonStyle}">
 									<StackPanel Orientation="Horizontal" HorizontalAlignment="Center">

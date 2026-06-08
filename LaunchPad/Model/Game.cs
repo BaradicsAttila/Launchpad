@@ -31,16 +31,7 @@ namespace LaunchPad.Model
         public DateTime? LastPlayedUtc => Sessions.Any()
             ? Sessions.Max(s => s.EndedAt)
             : null;
-		//public DateTime? LastPlayedUtc
-		//{
-		//	get
-		//	{
-		//		if (Sessions.Any())
-		//			return Sessions.Max(s => s.EndedAt);
-		//		else
-		//			return null;
-		//	}
-		//}
+
         [JsonIgnore]
         public string LastPlayedFormatted
         { 
@@ -59,8 +50,6 @@ namespace LaunchPad.Model
 
 				};
                 return formatted;
-
-
             }
 		}
         [JsonIgnore]

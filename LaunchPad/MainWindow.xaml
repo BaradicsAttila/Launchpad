@@ -30,7 +30,7 @@
 				<ColumnDefinition/>
 			</Grid.ColumnDefinitions>
 			<view:LeftMenu/>
-			<ContentControl Grid.Column="1" Content="{Binding CurrentPage}"/> <!--Remove opacity!!!!!!-->
+			<ContentControl Grid.Column="1" Content="{Binding CurrentPage}"/>
 		</Grid>
 	</Grid>
 
