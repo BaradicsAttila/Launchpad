@@ -35,8 +35,8 @@
 	</UserControl.Resources>
 	<Grid Margin="20">
 		<Grid.RowDefinitions>
-			<RowDefinition Height="50*"/>
-			<RowDefinition Height="50*"/>
+			<RowDefinition Height="405 "/>
+			<RowDefinition Height="*"/>
 		</Grid.RowDefinitions>
 		<Border Background="#1F1F1F" CornerRadius="5">
 			<StackPanel>
@@ -68,5 +68,4 @@
 				</StackPanel>
 			</StackPanel>
 		</Border>
-	</Grid>
-</UserControl>
+	</Grid></UserControl>

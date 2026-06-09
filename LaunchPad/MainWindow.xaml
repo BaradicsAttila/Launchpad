@@ -9,8 +9,8 @@
         mc:Ignorable="d"
         Title="MainWindow" Height="900" Width="1600"
 		Icon="/Resources/Images/Lp_Ikon.png"
-		MinWidth="365"
-		MinHeight="400">
+		MinWidth="530"
+		MinHeight="500">
 	<WindowChrome.WindowChrome>
 		<WindowChrome GlassFrameThickness="0" CaptionHeight="0"/>
 	</WindowChrome.WindowChrome>

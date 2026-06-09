@@ -30,7 +30,9 @@
     <Resource Include="Resources\Images\Lp_Ikon.png">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Resource>
-    <Resource Include="Resources\Images\Preview.jpg" />
+    <Resource Include="Resources\Images\Preview.jpg">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Resource>
   </ItemGroup>
 
 </Project>
