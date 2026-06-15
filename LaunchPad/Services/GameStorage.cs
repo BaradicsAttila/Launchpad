@@ -12,7 +12,7 @@ namespace LaunchPad.Services
 	{
 		private const string FilePath = "TestGames.json"; /*change later*/
 		private static readonly JsonSerializerOptions Options = new JsonSerializerOptions{ WriteIndented = true };
-		public List<Game> LoadGame()
+		public List<Game> LoadGames()
 		{
 			if (!File.Exists(FilePath))
 			{
