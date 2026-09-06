@@ -8,7 +8,7 @@ using LaunchPad.Model;
 
 namespace LaunchPad.Services
 {
-	internal class GameStorage
+	public class GameStorage
 	{
 		private const string FilePath = "TestGames.json"; /*change later*/
 		private static readonly JsonSerializerOptions Options = new JsonSerializerOptions{ WriteIndented = true };

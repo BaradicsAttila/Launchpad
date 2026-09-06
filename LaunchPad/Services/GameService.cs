@@ -4,10 +4,11 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Text;
+using System.Linq;
 
 namespace LaunchPad.Services
 {
-	internal class GameService
+	public class GameService
 	{
 		private readonly GameStorage _storage;
 		private readonly System.Timers.Timer _safetyTimer;
@@ -23,7 +24,7 @@ namespace LaunchPad.Services
 			}
 			Games.CollectionChanged += OnCollectionChanged;
 			_safetyTimer = new System.Timers.Timer(30000);
-			_safetyTimer.Elapsed += (_, _) => FlushActiveSession();
+			_safetyTimer.Elapsed += (_, _) => FlushActiveSessions();
 			_safetyTimer.AutoReset = true;
 			_safetyTimer.Start();
 		}
@@ -43,7 +44,38 @@ namespace LaunchPad.Services
 			game.PropertyChanged += (_, _) => Save();
 		}
 
-		private void MergeWithScanResoults(List<GameScanner.Sc>)
-
+		public void MergeWithScanResults(List<GameScanResult> scanResults)
+		{
+			foreach(var result in scanResults)
+			{
+				var existing = Games.FirstOrDefault(g=>string.Equals(g.Name, result.GameName, StringComparison.OrdinalIgnoreCase));
+				if (existing != null)
+				{
+					if (!string.Equals(existing.Source, result.Source, StringComparison.OrdinalIgnoreCase)) existing.Source = result.Source;
+				}
+				else
+				{
+					Games.Add(new Game(
+					name: result.GameName,
+					source: result.ExePath,
+					isFavourite: false,
+					isDeleted: false,
+					sessions: null
+					));
+				}
+			}
+		}
+		private void FlushActiveSessions()
+		{
+			var activeSessions = Games.Where(g => g.ActiveSession != null).ToList();
+			if (!activeSessions.Any()) return;
+			foreach (var game in activeSessions) game.FlushSession();
+			Save();
+			
+		}
+		public void Save()
+		{
+			_storage.SaveGames(Games.ToList());
+		}
 	}
 }

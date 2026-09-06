@@ -7,7 +7,7 @@ using LaunchPad.Model;
 
 namespace LaunchPad.Services
 {
-	internal class SettingsStorage
+	public class SettingsStorage
 	{
 		private const string FilePath = "Settings.json"; /*change later*/
 		private static readonly JsonSerializerOptions Options = new JsonSerializerOptions { WriteIndented = true };

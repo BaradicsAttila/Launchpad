@@ -4,7 +4,7 @@ using System.Text;
 
 namespace LaunchPad.Model
 {
-	internal class AppSettings
+	public class AppSettings
 	{
 		public string FontFamily { get; set; } = "Segoe UI";
 		public string FontColorPrimary { get; set; } = "#CCCCCC";

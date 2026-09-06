@@ -136,17 +136,19 @@ namespace LaunchPad.Model
 			ActiveSession = session;
 			RefreshDerivedProperties();
 		}
+
+		public void FlushSession()
+		{
+			if (ActiveSession == null) return;
+
+			ActiveSession.EndedAt = DateTime.UtcNow;
+			RefreshDerivedProperties();
+		}
 		public void EndSession()
 		{
 			if (ActiveSession == null) return;
 			ActiveSession.EndedAt = DateTime.UtcNow;
 			ActiveSession = null;
-			RefreshDerivedProperties();
-		}
-		public void backupsession()
-		{
-			if (ActiveSession == null) return;
-			ActiveSession.EndedAt = DateTime.UtcNow;
 			RefreshDerivedProperties();
 		}
 		private void RefreshDerivedProperties()

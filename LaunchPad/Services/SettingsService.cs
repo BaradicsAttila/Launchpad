@@ -8,7 +8,7 @@ using LaunchPad.Model;
 
 namespace LaunchPad.Services
 {
-	internal class SettingsService
+	public class SettingsService
 	{
 		private readonly SettingsStorage _storage;
 		public AppSettings Current { get; private set; }
@@ -29,7 +29,7 @@ namespace LaunchPad.Services
 
 			var dict = Application.Current.Resources;
 
-			dict["AppFontFamily"] = new System.Drawing.FontFamily(settings.FontFamily);
+			dict["AppFontFamily"] = new System.Windows.Media.FontFamily(settings.FontFamily);            
 			dict["AppFontColorPrimary"] = ToBrush(settings.FontColorPrimary);
 			dict["AppFontColorSecondary"] = ToBrush(settings.FontColorSecondary);
 			dict["AppMenuBackgroundPrimary"] = ToBrush(settings.MenuBackgroundPrimary);
@@ -38,6 +38,10 @@ namespace LaunchPad.Services
 			dict["AppBackgroundSecondary"] = ToBrush(settings.BackgroundSecondary);
 			dict["AppTitlebarBackground"] = ToBrush(settings.TitlebarBackground);
 			dict["AppSelectedMenuItemBackground"] = ToBrush(settings.SelectedMenuItemBackground);
+		}
+		public void Save()
+		{
+			_storage.SaveSettings(Current);
 		}
 	}
 	
