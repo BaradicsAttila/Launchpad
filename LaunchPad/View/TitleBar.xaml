@@ -17,7 +17,7 @@
 			<Setter Property="Width" Value="45"/>
             <Setter Property="Height" Value="45"/>
             <Setter Property="FontSize" Value="10"/>
-            <Setter Property="Foreground" Value="#CCCCCC"/>
+            <Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
             <Setter Property="Background" Value="Transparent"/>
 			<Setter Property="VerticalAlignment" Value="Top"/>
 			<Style.Triggers>
@@ -44,7 +44,7 @@
 		</Style>
 
 	</UserControl.Resources>
-	<Grid Background="#141419">
+    <Grid Background="{DynamicResource AppMenuBackgroundPrimary}">
 		<Grid.ColumnDefinitions>
 			<ColumnDefinition Width="20"/>
 			<ColumnDefinition Width="40"/>

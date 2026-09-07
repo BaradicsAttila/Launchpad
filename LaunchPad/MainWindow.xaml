@@ -10,14 +10,15 @@
         Title="MainWindow" Height="900" Width="1600"
 		Icon="/Resources/Images/Lp_Ikon.png"
 		MinWidth="530"
-		MinHeight="500">
-	<WindowChrome.WindowChrome>
+		MinHeight="500"
+		FontFamily="{DynamicResource AppFontFamily}">
+    <WindowChrome.WindowChrome>
 		<WindowChrome GlassFrameThickness="0" CaptionHeight="0"/>
 	</WindowChrome.WindowChrome>
 	<Window.DataContext>
 		<vm:MainPageVM/>
 	</Window.DataContext>
-	<Grid Background="#1A1A1A">
+    <Grid Background="{DynamicResource AppBackgroundSecondary}">
 		<Grid.RowDefinitions>
 			<RowDefinition Height="45"/>
 			<RowDefinition/>

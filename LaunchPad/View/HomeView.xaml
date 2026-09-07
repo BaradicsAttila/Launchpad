@@ -12,7 +12,7 @@
 			<Setter Property="Width" Value="200"/>
 			<Setter Property="Height" Value="35"/>
 			<Setter Property="FontSize" Value="20"/>
-			<Setter Property="Foreground" Value="#CCCCCC"/>
+            <Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
 			<Setter Property="Background" Value="Transparent"/>
 			<Style.Triggers>
 				<Trigger Property="IsMouseOver" Value="True">
@@ -33,11 +33,11 @@
 
 		</Style>
 		<DataTemplate x:Key="FavouriteCardTemplate">
-			<Border Margin="10 0 10 0" Padding="5" Width="230" CornerRadius="5" Background="#1A1A1A" BorderThickness="1" BorderBrush="#222222">
+            <Border Margin="10 0 10 0" Padding="5" Width="230" CornerRadius="5" Background="{DynamicResource AppBackgroundSecondary}" BorderThickness="1" BorderBrush="#222222">
 				<StackPanel>
 					<Image Source="{Binding Icon}"/>
-					<Label Content="{Binding Name}" Foreground="#CCCCCC" FontSize="14"/>
-					<Label Content="{Binding LastPlayedLabel}" Foreground="#CCCCCC" FontWeight="ExtraLight" FontSize="10"/>
+                    <Label Content="{Binding Name}" Foreground="{DynamicResource AppFontColorPrimary}" FontSize="14"/>
+                    <Label Content="{Binding LastPlayedLabel}" Foreground="{DynamicResource AppFontColorPrimary}" FontWeight="ExtraLight" FontSize="10"/>
 					<Border CornerRadius="5" Background="#5A3BB2">
 						<Button Style="{StaticResource PlayButtonStyle}">
 							<StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
@@ -64,7 +64,7 @@
 					</Style>
 				</StackPanel.Resources>
 				<Grid Margin="10">
-					<TextBlock Text=" Favourites" Foreground="#CCCCCC" FontSize="22"/>
+                    <TextBlock Text=" Favourites" Foreground="{DynamicResource AppFontColorPrimary}" FontSize="22"/>
 					<TextBlock Text="View All" Foreground="#8A6BE2" FontSize="14" HorizontalAlignment="Right" VerticalAlignment="Center"/>
 				</Grid>
 				<ItemsControl ItemsSource="{Binding Favourites}" ItemTemplate="{StaticResource FavouriteCardTemplate}">
@@ -76,5 +76,9 @@
 				</ItemsControl>
 			</StackPanel>
 		</Border>
-	</Grid>
+        <StackPanel>
+            <Button Content="TESZT SZÍNVÁLTÁS" Click="TestThemeSwap_Click" />
+            <Button Content="TESZT VISSZA" Click="TestThemeSwap_Clickback" />
+        </StackPanel>
+    </Grid>
 </UserControl>

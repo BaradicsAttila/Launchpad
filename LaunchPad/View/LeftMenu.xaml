@@ -12,7 +12,7 @@
 		<Style TargetType="RadioButton">
 			<Setter Property="FontSize" Value="20"/>
 			<Setter Property="Margin" Value="20 10 20 0"/>
-			<Setter Property="Foreground" Value="#CCCCCC"/>
+            <Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
 			<Setter Property="Template">
 				<Setter.Value>
 					<ControlTemplate TargetType="RadioButton">
@@ -21,7 +21,7 @@
 						</Border>
 						<ControlTemplate.Triggers>
 							<Trigger Property="IsChecked" Value="True">
-								<Setter TargetName="BorderBg" Property="Background" Value="#408A2BE2"/>
+								<Setter TargetName="BorderBg" Property="Background" Value="{DynamicResource AppSelectedMenuItemBackground}"/>
 							</Trigger>
 						</ControlTemplate.Triggers>
 					</ControlTemplate>
@@ -33,12 +33,12 @@
 			<Style.Triggers>
 				<DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=RadioButton}}" Value="True">
 					<Setter Property="FontFamily" Value="{StaticResource IconsFill}"/>
-					<Setter Property="Foreground" Value="#8A6BE2"/>
+                    <Setter Property="Foreground" Value="{DynamicResource AppFontColorSecondary}"/>
 				</DataTrigger>
 			</Style.Triggers>
 		</Style>
 		<Style x:Key="QuickLabel" TargetType="Label">
-			<Setter Property="Foreground" Value="#CCCCCC"/>
+            <Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
 			<Setter Property="FontSize" Value="12"/>
 		</Style>
 		<Style TargetType="WrapPanel">
@@ -51,14 +51,14 @@
 			<Setter Property="Height" Value="30"/>
 		</Style>
 	</UserControl.Resources>
-	<Grid Background="#111119">
+    <Grid Background="{DynamicResource AppMenuBackgroundPrimary}">
 		<Grid.RowDefinitions>
 			<RowDefinition Height="100*" MaxHeight="330"/>
 			<RowDefinition Height="100*" MaxHeight="330"/>
 			<RowDefinition Height="*" MinHeight="150"/>
 			<RowDefinition Height="20"/>
 		</Grid.RowDefinitions>
-		<Rectangle Width="auto" Height="1px" Fill="#CCCCCC" VerticalAlignment="Top" Opacity="0.1"/>
+        <Rectangle Width="auto" Height="1px" Fill="{DynamicResource AppFontColorPrimary}" VerticalAlignment="Top" Opacity="0.1"/>
 		<ScrollViewer VerticalScrollBarVisibility="Hidden" >
 			<StackPanel >
 				<RadioButton x:Name="RBHome" GroupName="Menu" IsChecked="{Binding IsHomeSelected, Mode=TwoWay}">
@@ -79,13 +79,13 @@
 			</StackPanel>
 		</ScrollViewer>
 
-		<Border Grid.Row="1" Background="#15151C" Margin="10 10 10 10" CornerRadius="10" BorderThickness="1" BorderBrush="#222222">
+        <Border Grid.Row="1" Background="{DynamicResource AppMenuBackgroundSecondary}" Margin="10 10 10 10" CornerRadius="10" BorderThickness="1" BorderBrush="#222222">
 			<Grid>
 				<Grid.RowDefinitions>
 					<RowDefinition Height="auto"/>
 					<RowDefinition Height="1*"/>
 				</Grid.RowDefinitions>
-				<TextBlock Text="Quick Launch" Foreground="#CCCCCC" Margin="10 10 10 0" FontSize="14"/>
+                <TextBlock Text="Quick Launch" Foreground="{DynamicResource AppFontColorPrimary}" Margin="10 10 10 0" FontSize="14"/>
 				<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Hidden">
 					<StackPanel>
 						<WrapPanel>
@@ -128,7 +128,7 @@
 				</ScrollViewer>
 			</Grid>
 		</Border>
-		<Border Grid.Row="2" VerticalAlignment="Bottom"  Background="#15151C" Margin="10 10 10 10" CornerRadius="10" BorderThickness="1" BorderBrush="#222222">
+        <Border Grid.Row="2" VerticalAlignment="Bottom"  Background="{DynamicResource AppMenuBackgroundSecondary}" Margin="10 10 10 10" CornerRadius="10" BorderThickness="1" BorderBrush="#222222">
 			<Grid>
 				<Grid.RowDefinitions>
 					<RowDefinition Height="40"/>
@@ -136,7 +136,7 @@
 				</Grid.RowDefinitions>
 				<WrapPanel Margin="10 10 10 10">
 					<TextBlock Text="" FontFamily="{StaticResource IconsFill}" Foreground="LimeGreen" FontSize="6" VerticalAlignment="Center"/>
-					<TextBlock Text="Now Playing" Foreground="#CCCCCC" Margin="3 0 0 0"/>
+                    <TextBlock Text="Now Playing" Foreground="{DynamicResource AppFontColorPrimary}" Margin="3 0 0 0"/>
 				</WrapPanel>
 				<WrapPanel Grid.Row="1" Margin="0 0 0 15">
 					<Border Style="{StaticResource QImgB}" Margin="10 5 5 0">
@@ -145,8 +145,8 @@
 					<StackPanel>
 						<Label Style="{StaticResource QuickLabel}" Content="Elden Ring"/>
 						<WrapPanel Margin="0 -10 0 0">
-							<Label Foreground="#CCCCCC" FontWeight="ExtraLight" FontSize="10" Content="Playing for:"/>
-							<Label Foreground="#CCCCCC" FontWeight="ExtraLight" FontSize="10" Margin="-5 0 0 0" Content="45m"/>
+                            <Label Foreground="{DynamicResource AppFontColorPrimary}" FontWeight="ExtraLight" FontSize="10" Content="Playing for:"/>
+                            <Label Foreground="{DynamicResource AppFontColorPrimary}" FontWeight="ExtraLight" FontSize="10" Margin="-5 0 0 0" Content="45m"/>
 						</WrapPanel>
 					</StackPanel>
 				</WrapPanel>
