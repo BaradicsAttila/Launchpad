@@ -63,7 +63,7 @@
 		<Rectangle
 			Grid.Column="0"
 			Grid.ColumnSpan="4"
-			Fill="#111119"/>
+			Fill="{DynamicResource AppMenuBackgroundPrimary}"/>
 
 		<Button
 			Style="{StaticResource NoHoverButtonStyle}"
@@ -90,7 +90,7 @@
 			Margin="0 3 0 0"
 			Grid.Column="3"
 			Text="LaunchPad" 
-			Foreground="#cccccc" 
+			Foreground="{DynamicResource AppFontColorPrimary}" 
 			FontSize="25"/>
 
 		<Rectangle 

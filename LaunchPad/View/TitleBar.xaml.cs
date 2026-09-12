@@ -85,5 +85,10 @@ namespace LaunchPad.View
                 window.WindowState = WindowState.Normal;
             }
         }
-    }
+
+		private void Button_Click(object sender, RoutedEventArgs e)
+		{
+
+		}
+	}
 }

@@ -25,8 +25,8 @@ namespace LaunchPad.View
         public HomeView()
         {
             InitializeComponent();
-            DataContext = App.ServiceProvider.GetRequiredService<HomeViewModel>();
-        }
+			DataContext = App.ServiceProvider.GetRequiredService<HomeViewModel>();
+		}
         private void TestThemeSwap_Click(object sender, RoutedEventArgs e)
         {
             var settingsService = App.ServiceProvider.GetRequiredService<SettingsService>();

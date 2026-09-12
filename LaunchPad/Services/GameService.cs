@@ -3,6 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.Diagnostics;
+using System.IO;
 using System.Text;
 using System.Linq;
 
@@ -13,10 +15,19 @@ namespace LaunchPad.Services
 		private readonly GameStorage _storage;
 		private readonly System.Timers.Timer _safetyTimer;
 		public ObservableCollection<Game> Games { get; } = new();
+		public int TotalGamesCount => Games.Count;
+
 		public GameService(GameStorage storage)
 		{
 			_storage = storage;
+			Debug.WriteLine($"[GameService] Aktualis munkakonyvtar: {Directory.GetCurrentDirectory()}");
+			Debug.WriteLine($"[GameService] AppContext.BaseDirectory: {AppContext.BaseDirectory}");
+
 			var loaded = _storage.LoadGames();
+
+			Debug.WriteLine($"[GameService] Betoltott jatekok szama: {loaded.Count}");
+			Debug.WriteLine($"[GameService] Ezekbol favourite: {loaded.Count(g => g.IsFavourite)}");
+
 			foreach (var game in loaded)
 			{
 				SubscribeToGame(game);
@@ -46,9 +57,9 @@ namespace LaunchPad.Services
 
 		public void MergeWithScanResults(List<GameScanResult> scanResults)
 		{
-			foreach(var result in scanResults)
+			foreach (var result in scanResults)
 			{
-				var existing = Games.FirstOrDefault(g=>string.Equals(g.Name, result.GameName, StringComparison.OrdinalIgnoreCase));
+				var existing = Games.FirstOrDefault(g => string.Equals(g.Name, result.GameName, StringComparison.OrdinalIgnoreCase));
 				if (existing != null)
 				{
 					if (!string.Equals(existing.Source, result.Source, StringComparison.OrdinalIgnoreCase)) existing.Source = result.Source;
@@ -71,7 +82,7 @@ namespace LaunchPad.Services
 			if (!activeSessions.Any()) return;
 			foreach (var game in activeSessions) game.FlushSession();
 			Save();
-			
+
 		}
 		public void Save()
 		{

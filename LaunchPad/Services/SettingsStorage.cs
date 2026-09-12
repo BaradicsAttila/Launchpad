@@ -9,8 +9,12 @@ namespace LaunchPad.Services
 {
 	public class SettingsStorage
 	{
-		private const string FilePath = "Settings.json"; /*change later*/
-		private static readonly JsonSerializerOptions Options = new JsonSerializerOptions { WriteIndented = true };
+		private const string FilePath = @"Resources\Data\Settings.json";
+		private static readonly JsonSerializerOptions Options = new JsonSerializerOptions
+		{
+			WriteIndented = true,
+			PropertyNameCaseInsensitive = true
+		};
 		public AppSettings LoadSettings()
 		{
 			if (!File.Exists(FilePath))
@@ -18,6 +22,10 @@ namespace LaunchPad.Services
 				return new AppSettings();
 			}
 			string json = File.ReadAllText(FilePath);
+			if (string.IsNullOrWhiteSpace(json))
+			{
+				return new AppSettings();
+			}
 			return JsonSerializer.Deserialize<AppSettings>(json, Options) ?? new AppSettings();
 		}
 		public void SaveSettings (AppSettings settings)
