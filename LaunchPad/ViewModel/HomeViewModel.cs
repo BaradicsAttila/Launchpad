@@ -12,7 +12,9 @@ namespace LaunchPad.ViewModel
 	{
 		private readonly GameService _gameService;
 		public ObservableCollection<Game> Favourites { get; }
+
 		public int TotalGamesCount => _gameService.TotalGamesCount;
+
 		public HomeViewModel(GameService gameService)
 		{
 			_gameService = gameService;

@@ -340,7 +340,7 @@ public class GameScanner
 		return results;
 	}
 
-	private static List<string> FindSteamLibraries()
+	public static List<string> FindSteamLibraries()
 	{
 		var libraries = new List<string>();
 
