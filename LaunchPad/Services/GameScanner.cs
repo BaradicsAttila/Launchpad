@@ -59,6 +59,39 @@ public class GameScanner
 
 	#endregion
 
+	#region Excluded Exe Name Patterns
+
+	// Ha egy exe fajlneve (kiterjesztes nelkul, kisbetuvel) TARTALMAZZA
+	// valamelyik mintat, akkor nem tekintjuk a jatek fo exe-jenek, meg akkor
+	// sem, ha nagy meretu (pl. egy beagyazott DirectX/VCRedist telepito
+	// tobb tiz MB is lehet). Meret-fuggetlen: egy 2 MB-os Unity-s jatek
+	// exe-je pontosan ugy elfogadhato, mint egy 200 MB-os AAA jatek exe-je.
+	private static readonly string[] ExcludedExeNamePatterns = new[]
+	{
+		"uninstall", "unins000", "unins001", "unwise",
+		"setup", "install",
+		"vcredist", "vc_redist", "vcruntime",
+		"directx", "dxsetup", "dxwebsetup",
+		"dotnetfx", "dotnet-runtime", "windowsdesktop-runtime",
+		"crashreport", "crashpad", "crashhandler", "unitycrashhandler",
+		"redist", "prerequisites", "prereq",
+		"updater", "update_checker", "autoupdate",
+		"eossdk", "easyanticheat_setup", "battleye_setup",
+		"vcpp", "oalinst"
+	};
+
+	/// <summary>
+	/// True, ha a fajlnev alapjan valoszinuleg NEM a jatek fo exe-je,
+	/// hanem valamilyen telepito/segedprogram/futtatokornyezet.
+	/// </summary>
+	private static bool IsLikelyNonGameExecutable(string fileName)
+	{
+		var nameOnly = Path.GetFileNameWithoutExtension(fileName).ToLowerInvariant();
+		return ExcludedExeNamePatterns.Any(pattern => nameOnly.Contains(pattern));
+	}
+
+	#endregion
+
 	// -------------------------------------------------------------------------
 	// PUBLIC API
 	// -------------------------------------------------------------------------
@@ -81,30 +114,47 @@ public class GameScanner
 			// Run highest priority sources first so their names are already in seen
 			// when lower priority sources find the same exe
 			progress?.Report("Reading Steam manifests...");
-			AddRange(results, seen, GetFromSteam());
+			var steamResults = GetFromSteam();
+			Debug.WriteLine($"[RunInstantScansAsync] Steam talalatok: {steamResults.Count}");
+			AddRange(results, seen, steamResults);
 
 			progress?.Report("Reading Epic Games manifests...");
-			AddRange(results, seen, GetFromEpic());
+			var epicResults = GetFromEpic();
+			Debug.WriteLine($"[RunInstantScansAsync] Epic talalatok: {epicResults.Count}");
+			AddRange(results, seen, epicResults);
 
 			progress?.Report("Reading Start Menu shortcuts...");
-			AddRange(results, seen, GetFromStartMenu());
+			var startMenuResults = GetFromStartMenu();
+			Debug.WriteLine($"[RunInstantScansAsync] StartMenu talalatok: {startMenuResults.Count}");
+			AddRange(results, seen, startMenuResults);
 
 			progress?.Report("Reading Registry...");
-			AddRange(results, seen, GetFromRegistry());
+			var registryResults = GetFromRegistry();
+			Debug.WriteLine($"[RunInstantScansAsync] Registry talalatok: {registryResults.Count}");
+			AddRange(results, seen, registryResults);
 
 			progress?.Report("Reading Ubisoft Connect...");
-			AddRange(results, seen, GetFromUbisoft());
+			var ubisoftResults = GetFromUbisoft();
+			Debug.WriteLine($"[RunInstantScansAsync] Ubisoft talalatok: {ubisoftResults.Count}");
+			AddRange(results, seen, ubisoftResults);
 
 			progress?.Report("Reading EA App...");
-			AddRange(results, seen, GetFromEA());
+			var eaResults = GetFromEA();
+			Debug.WriteLine($"[RunInstantScansAsync] EA talalatok: {eaResults.Count}");
+			AddRange(results, seen, eaResults);
 
 			progress?.Report("Reading GOG Galaxy...");
-			AddRange(results, seen, GetFromGOG());
+			var gogResults = GetFromGOG();
+			Debug.WriteLine($"[RunInstantScansAsync] GOG talalatok: {gogResults.Count}");
+			AddRange(results, seen, gogResults);
 
 			progress?.Report("Reading Battle.net...");
-			AddRange(results, seen, GetFromBattleNet());
+			var battleNetResults = GetFromBattleNet();
+			Debug.WriteLine($"[RunInstantScansAsync] BattleNet talalatok: {battleNetResults.Count}");
+			AddRange(results, seen, battleNetResults);
 
 			progress?.Report($"Done — found {results.Count} games.");
+			Debug.WriteLine($"[RunInstantScansAsync] OSSZESEN (dedup utan): {results.Count}");
 			return results;
 		});
 	}
@@ -142,6 +192,7 @@ public class GameScanner
 				}
 			}
 
+			Debug.WriteLine($"[ScanFoldersAsync] Osszesen talalt exe: {results.Count}");
 			return results;
 		});
 	}
@@ -169,9 +220,13 @@ public class GameScanner
 
 		foreach (var root in roots)
 		{
+			Debug.WriteLine($"[GetFromStartMenu] Mappa: {root} | letezik: {Directory.Exists(root)}");
 			if (!Directory.Exists(root)) continue;
 
-			foreach (var lnk in Directory.EnumerateFiles(root, "*.lnk", SearchOption.AllDirectories))
+			var lnkFiles = Directory.EnumerateFiles(root, "*.lnk", SearchOption.AllDirectories).ToList();
+			Debug.WriteLine($"[GetFromStartMenu] {root} alatt talalt .lnk fajlok: {lnkFiles.Count}");
+
+			foreach (var lnk in lnkFiles)
 			{
 				try
 				{
@@ -180,7 +235,12 @@ public class GameScanner
 					if (string.IsNullOrEmpty(target)) continue;
 					if (!target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
 					if (!File.Exists(target)) continue;
-					if (new FileInfo(target).Length < 5_000_000) continue;
+
+					if (IsLikelyNonGameExecutable(Path.GetFileName(target)))
+					{
+						Debug.WriteLine($"[GetFromStartMenu] Kihagyva (nev alapjan telepito/segedprogram): {target}");
+						continue;
+					}
 
 					results.Add(new GameScanResult
 					{
@@ -245,9 +305,16 @@ public class GameScanner
 		foreach (var key in keys)
 		{
 			using var root = Registry.LocalMachine.OpenSubKey(key);
-			if (root == null) continue;
+			if (root == null)
+			{
+				Debug.WriteLine($"[GetFromRegistry] Nem sikerult megnyitni: {key}");
+				continue;
+			}
 
-			foreach (var subKeyName in root.GetSubKeyNames())
+			var subKeyNames = root.GetSubKeyNames();
+			Debug.WriteLine($"[GetFromRegistry] {key} alatt talalt bejegyzesek: {subKeyNames.Length}");
+
+			foreach (var subKeyName in subKeyNames)
 			{
 				try
 				{
@@ -263,8 +330,8 @@ public class GameScanner
 					// Only scan the top-level install folder (not recursive)
 					// since InstallLocation points directly to the game folder
 					var exe = Directory.EnumerateFiles(installLocation, "*.exe")
+						.Where(f => !IsLikelyNonGameExecutable(Path.GetFileName(f)))
 						.Select(f => new FileInfo(f))
-						.Where(f => f.Length > 5_000_000)
 						.OrderByDescending(f => f.Length)
 						.FirstOrDefault();
 
@@ -277,7 +344,10 @@ public class GameScanner
 						Source = "Registry"
 					});
 				}
-				catch { }
+				catch (Exception ex)
+				{
+					Debug.WriteLine($"[GetFromRegistry] HIBA a(z) {subKeyName} feldolgozasakor: {ex.Message}");
+				}
 			}
 		}
 
@@ -292,12 +362,22 @@ public class GameScanner
 	{
 		var results = new List<GameScanResult>();
 
-		foreach (var library in FindSteamLibraries())
+		var foundLibraries = FindSteamLibraries();
+		Debug.WriteLine($"[GetFromSteam] Talalt Steam library-k: {string.Join(", ", foundLibraries)}");
+
+		foreach (var library in foundLibraries)
 		{
 			var steamAppsPath = Path.Combine(library, "steamapps");
-			if (!Directory.Exists(steamAppsPath)) continue;
+			if (!Directory.Exists(steamAppsPath))
+			{
+				Debug.WriteLine($"[GetFromSteam] Nem letezik: {steamAppsPath}");
+				continue;
+			}
 
-			foreach (var manifest in Directory.EnumerateFiles(steamAppsPath, "appmanifest_*.acf"))
+			var manifests = Directory.EnumerateFiles(steamAppsPath, "appmanifest_*.acf").ToList();
+			Debug.WriteLine($"[GetFromSteam] {steamAppsPath} alatt talalt manifest fajlok: {manifests.Count}");
+
+			foreach (var manifest in manifests)
 			{
 				try
 				{
@@ -313,18 +393,33 @@ public class GameScanner
 						.FirstOrDefault(l => l.TrimStart().StartsWith("\"installdir\""))
 						?.Split('"')[3];
 
+					Debug.WriteLine($"[GetFromSteam] Manifest: {Path.GetFileName(manifest)} | name={name} | installdir={installDir}");
+
 					if (string.IsNullOrEmpty(installDir)) continue;
 
 					var gamePath = Path.Combine(steamAppsPath, "common", installDir);
-					if (!Directory.Exists(gamePath)) continue;
+					if (!Directory.Exists(gamePath))
+					{
+						Debug.WriteLine($"[GetFromSteam] gamePath nem letezik: {gamePath}");
+						continue;
+					}
 
-					var exe = Directory.EnumerateFiles(gamePath, "*.exe", SearchOption.AllDirectories)
+					var candidates = Directory.EnumerateFiles(gamePath, "*.exe", SearchOption.AllDirectories)
+						.Where(f => !IsLikelyNonGameExecutable(Path.GetFileName(f)))
 						.Select(f => new FileInfo(f))
-						.Where(f => f.Length > 5_000_000)
 						.OrderByDescending(f => f.Length)
-						.FirstOrDefault();
+						.ToList();
 
-					if (exe == null) continue;
+					Debug.WriteLine($"[GetFromSteam] {gamePath} alatt (szuro utan) marad exe-k: " +
+						string.Join(", ", candidates.Select(f => $"{f.Name} ({f.Length / 1024} KB)")));
+
+					var exe = candidates.FirstOrDefault();
+
+					if (exe == null)
+					{
+						Debug.WriteLine($"[GetFromSteam] Nincs hasznalhato exe ehhez: {installDir}");
+						continue;
+					}
 
 					results.Add(new GameScanResult
 					{
@@ -333,7 +428,10 @@ public class GameScanner
 						Source = "Steam"
 					});
 				}
-				catch { }
+				catch (Exception ex)
+				{
+					Debug.WriteLine($"[GetFromSteam] HIBA a(z) {manifest} feldolgozasakor: {ex}");
+				}
 			}
 		}
 
@@ -345,12 +443,16 @@ public class GameScanner
 		var libraries = new List<string>();
 
 		var defaultSteam = @"C:\Program Files (x86)\Steam";
+		Debug.WriteLine($"[FindSteamLibraries] Alapertelmezett Steam mappa letezik: {Directory.Exists(defaultSteam)} ({defaultSteam})");
+
 		if (Directory.Exists(defaultSteam))
 			libraries.Add(defaultSteam);
 
 		// Steam stores all library paths in this file
 		// This handles users who have games on D:\, E:\, etc.
 		var vdfPath = Path.Combine(defaultSteam, @"steamapps\libraryfolders.vdf");
+		Debug.WriteLine($"[FindSteamLibraries] libraryfolders.vdf letezik: {File.Exists(vdfPath)} ({vdfPath})");
+
 		if (!File.Exists(vdfPath)) return libraries;
 
 		try
@@ -361,11 +463,15 @@ public class GameScanner
 				if (!line.TrimStart().StartsWith("\"path\"")) continue;
 
 				var path = line.Split('"')[3].Replace(@"\\", @"\");
+				Debug.WriteLine($"[FindSteamLibraries] vdf-ben talalt path: {path} | letezik: {Directory.Exists(path)}");
 				if (Directory.Exists(path))
 					libraries.Add(path);
 			}
 		}
-		catch { }
+		catch (Exception ex)
+		{
+			Debug.WriteLine($"[FindSteamLibraries] HIBA a vdf feldolgozasakor: {ex}");
+		}
 
 		return libraries;
 	}
@@ -379,9 +485,13 @@ public class GameScanner
 		var results = new List<GameScanResult>();
 
 		var manifestsPath = @"C:\ProgramData\Epic\EpicGamesLauncher\Data\Manifests";
+		Debug.WriteLine($"[GetFromEpic] Manifests mappa letezik: {Directory.Exists(manifestsPath)} ({manifestsPath})");
 		if (!Directory.Exists(manifestsPath)) return results;
 
-		foreach (var file in Directory.EnumerateFiles(manifestsPath, "*.item"))
+		var itemFiles = Directory.EnumerateFiles(manifestsPath, "*.item").ToList();
+		Debug.WriteLine($"[GetFromEpic] Talalt .item fajlok: {itemFiles.Count}");
+
+		foreach (var file in itemFiles)
 		{
 			try
 			{
@@ -398,10 +508,14 @@ public class GameScanner
 				var launchExe = root.TryGetProperty("LaunchExecutable", out var exe)
 					? exe.GetString() : null;
 
+				Debug.WriteLine($"[GetFromEpic] {Path.GetFileName(file)} | name={displayName} | installPath={installPath} | launchExe={launchExe}");
+
 				if (string.IsNullOrEmpty(installPath) || !Directory.Exists(installPath)) continue;
 
 				string? exePath = null;
 
+				// Epic pontosan megmondja, melyik exe-t kell inditani - ez a
+				// legmegbizhatobb forras, itt nincs is szukseg nev-alapu szuresre.
 				if (!string.IsNullOrEmpty(launchExe))
 				{
 					var fullPath = Path.Combine(installPath, launchExe);
@@ -409,14 +523,18 @@ public class GameScanner
 						exePath = fullPath;
 				}
 
-				// Fallback if LaunchExecutable is missing or points to a wrapper
+				// Fallback, ha a LaunchExecutable hianyzik vagy egy wrapper-re mutat
 				exePath ??= Directory.EnumerateFiles(installPath, "*.exe", SearchOption.AllDirectories)
+					.Where(f => !IsLikelyNonGameExecutable(Path.GetFileName(f)))
 					.Select(f => new FileInfo(f))
-					.Where(f => f.Length > 5_000_000)
 					.OrderByDescending(f => f.Length)
 					.FirstOrDefault()?.FullName;
 
-				if (exePath == null) continue;
+				if (exePath == null)
+				{
+					Debug.WriteLine($"[GetFromEpic] Nem talalhato hasznalhato exe ehhez: {displayName}");
+					continue;
+				}
 
 				results.Add(new GameScanResult
 				{
@@ -425,7 +543,10 @@ public class GameScanner
 					Source = "Epic"
 				});
 			}
-			catch { }
+			catch (Exception ex)
+			{
+				Debug.WriteLine($"[GetFromEpic] HIBA a(z) {file} feldolgozasakor: {ex.Message}");
+			}
 		}
 
 		return results;
@@ -440,19 +561,27 @@ public class GameScanner
 		var results = new List<GameScanResult>();
 
 		var root = @"C:\Program Files (x86)\Ubisoft\Ubisoft Game Launcher\games";
+		Debug.WriteLine($"[GetFromUbisoft] Mappa letezik: {Directory.Exists(root)} ({root})");
 		if (!Directory.Exists(root)) return results;
 
-		foreach (var gameFolder in Directory.EnumerateDirectories(root))
+		var gameFolders = Directory.EnumerateDirectories(root).ToList();
+		Debug.WriteLine($"[GetFromUbisoft] Talalt almappak: {gameFolders.Count}");
+
+		foreach (var gameFolder in gameFolders)
 		{
 			try
 			{
 				var exe = Directory.EnumerateFiles(gameFolder, "*.exe", SearchOption.AllDirectories)
+					.Where(f => !IsLikelyNonGameExecutable(Path.GetFileName(f)))
 					.Select(f => new FileInfo(f))
-					.Where(f => f.Length > 5_000_000)
 					.OrderByDescending(f => f.Length)
 					.FirstOrDefault();
 
-				if (exe == null) continue;
+				if (exe == null)
+				{
+					Debug.WriteLine($"[GetFromUbisoft] Nincs hasznalhato exe ehhez: {gameFolder}");
+					continue;
+				}
 
 				results.Add(new GameScanResult
 				{
@@ -461,7 +590,10 @@ public class GameScanner
 					Source = "Ubisoft"
 				});
 			}
-			catch { }
+			catch (Exception ex)
+			{
+				Debug.WriteLine($"[GetFromUbisoft] HIBA a(z) {gameFolder} feldolgozasakor: {ex.Message}");
+			}
 		}
 
 		return results;
@@ -481,19 +613,31 @@ public class GameScanner
 			@"C:\Program Files (x86)\Origin Games",
 		};
 
+		foreach (var root in roots)
+		{
+			Debug.WriteLine($"[GetFromEA] Mappa letezik: {Directory.Exists(root)} ({root})");
+		}
+
 		foreach (var root in roots.Where(Directory.Exists))
 		{
-			foreach (var gameFolder in Directory.EnumerateDirectories(root))
+			var gameFolders = Directory.EnumerateDirectories(root).ToList();
+			Debug.WriteLine($"[GetFromEA] {root} alatt talalt almappak: {gameFolders.Count}");
+
+			foreach (var gameFolder in gameFolders)
 			{
 				try
 				{
 					var exe = Directory.EnumerateFiles(gameFolder, "*.exe", SearchOption.AllDirectories)
+						.Where(f => !IsLikelyNonGameExecutable(Path.GetFileName(f)))
 						.Select(f => new FileInfo(f))
-						.Where(f => f.Length > 5_000_000)
 						.OrderByDescending(f => f.Length)
 						.FirstOrDefault();
 
-					if (exe == null) continue;
+					if (exe == null)
+					{
+						Debug.WriteLine($"[GetFromEA] Nincs hasznalhato exe ehhez: {gameFolder}");
+						continue;
+					}
 
 					results.Add(new GameScanResult
 					{
@@ -502,7 +646,10 @@ public class GameScanner
 						Source = "EA"
 					});
 				}
-				catch { }
+				catch (Exception ex)
+				{
+					Debug.WriteLine($"[GetFromEA] HIBA a(z) {gameFolder} feldolgozasakor: {ex.Message}");
+				}
 			}
 		}
 
@@ -518,19 +665,27 @@ public class GameScanner
 		var results = new List<GameScanResult>();
 
 		var root = @"C:\Program Files (x86)\GOG Galaxy\Games";
+		Debug.WriteLine($"[GetFromGOG] Mappa letezik: {Directory.Exists(root)} ({root})");
 		if (!Directory.Exists(root)) return results;
 
-		foreach (var gameFolder in Directory.EnumerateDirectories(root))
+		var gameFolders = Directory.EnumerateDirectories(root).ToList();
+		Debug.WriteLine($"[GetFromGOG] Talalt almappak: {gameFolders.Count}");
+
+		foreach (var gameFolder in gameFolders)
 		{
 			try
 			{
 				var exe = Directory.EnumerateFiles(gameFolder, "*.exe", SearchOption.AllDirectories)
+					.Where(f => !IsLikelyNonGameExecutable(Path.GetFileName(f)))
 					.Select(f => new FileInfo(f))
-					.Where(f => f.Length > 5_000_000)
 					.OrderByDescending(f => f.Length)
 					.FirstOrDefault();
 
-				if (exe == null) continue;
+				if (exe == null)
+				{
+					Debug.WriteLine($"[GetFromGOG] Nincs hasznalhato exe ehhez: {gameFolder}");
+					continue;
+				}
 
 				results.Add(new GameScanResult
 				{
@@ -539,7 +694,10 @@ public class GameScanner
 					Source = "GOG"
 				});
 			}
-			catch { }
+			catch (Exception ex)
+			{
+				Debug.WriteLine($"[GetFromGOG] HIBA a(z) {gameFolder} feldolgozasakor: {ex.Message}");
+			}
 		}
 
 		return results;
@@ -565,17 +723,26 @@ public class GameScanner
 			@"C:\Program Files (x86)\Call of Duty",
 		};
 
+		foreach (var root in roots)
+		{
+			Debug.WriteLine($"[GetFromBattleNet] Mappa letezik: {Directory.Exists(root)} ({root})");
+		}
+
 		foreach (var root in roots.Where(Directory.Exists))
 		{
 			try
 			{
 				var exe = Directory.EnumerateFiles(root, "*.exe", SearchOption.AllDirectories)
+					.Where(f => !IsLikelyNonGameExecutable(Path.GetFileName(f)))
 					.Select(f => new FileInfo(f))
-					.Where(f => f.Length > 5_000_000)
 					.OrderByDescending(f => f.Length)
 					.FirstOrDefault();
 
-				if (exe == null) continue;
+				if (exe == null)
+				{
+					Debug.WriteLine($"[GetFromBattleNet] Nincs hasznalhato exe ehhez: {root}");
+					continue;
+				}
 
 				results.Add(new GameScanResult
 				{
@@ -584,7 +751,10 @@ public class GameScanner
 					Source = "BattleNet"
 				});
 			}
-			catch { }
+			catch (Exception ex)
+			{
+				Debug.WriteLine($"[GetFromBattleNet] HIBA a(z) {root} feldolgozasakor: {ex.Message}");
+			}
 		}
 
 		return results;
@@ -606,11 +776,8 @@ public class GameScanner
 
 		foreach (var f in files)
 		{
-			long size = 0;
-			try { size = new FileInfo(f).Length; }
-			catch { continue; }
-
-			if (size > 5_000_000) yield return f;
+			if (IsLikelyNonGameExecutable(Path.GetFileName(f))) continue;
+			yield return f;
 		}
 
 		IEnumerable<string> dirs = Enumerable.Empty<string>();
