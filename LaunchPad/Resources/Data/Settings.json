@@ -1,0 +1,13 @@
+{
+	"FontFamily": "Segoe UI",
+	"FontColorPrimary": "#CCCCCC",
+	"FontColorSecondary": "#8A6BE2",
+	"MenuBackgroundPrimary": "#111119",
+	"MenuBackgroundSecondary": "#15151C",
+	"BackgroundPrimary": "#1F1F1F",
+	"BackgroundSecondary": "#1A1A1A",
+	"TitlebarBackground": "#444444",
+	"SelectedMenuItemBackground": "#408A2BE2",
+	"CustomGameFolders": [
+	]
+}

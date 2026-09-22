@@ -10,8 +10,10 @@ namespace LaunchPad.Services
 {
 	public class GameStorage
 	{
-		private const string FilePath = @"Resources\Data\Games.json";
-
+		private static readonly string DataFolder = Path.Combine(
+				Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+				"LaunchPad");
+		private static readonly string FilePath = Path.Combine(DataFolder, "Games.json");
 		private static readonly JsonSerializerOptions Options = new JsonSerializerOptions
 		{
 			WriteIndented = true,
@@ -36,6 +38,7 @@ namespace LaunchPad.Services
 		}
 		public void SaveGames(List<Game> games)
 		{
+			Directory.CreateDirectory(DataFolder);
 			string json = JsonSerializer.Serialize(games, Options);
 			File.WriteAllText(FilePath, json);
 		}

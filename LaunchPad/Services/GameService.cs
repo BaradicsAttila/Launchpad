@@ -6,6 +6,7 @@ using System.Collections.Specialized;
 using System.Text;
 using System.Linq;
 using System.Threading.Tasks;
+using System.IO;
 
 namespace LaunchPad.Services
 {
@@ -94,6 +95,44 @@ namespace LaunchPad.Services
 			Save();
 
 		}
+
+		public void MarkMissingGamesAsDeleted()
+		{
+			bool anyChanged = false;
+
+			foreach (var game in Games.Where(g => !g.IsDeleted))
+			{
+				if (!File.Exists(game.Source))
+				{
+					game.IsDeleted = true;
+					anyChanged = true;
+				}
+			}
+
+			if (anyChanged) Save();
+		}
+
+		public List<string> GetChangedCustomFolders(
+			List<string> customFolders,
+			Dictionary<string, DateTime> lastScanTimes)
+		{
+			var changed = new List<string>();
+
+			foreach (var folder in customFolders)
+			{
+				if (!Directory.Exists(folder)) continue;
+
+				var lastWrite = Directory.GetLastWriteTimeUtc(folder);
+
+				if (!lastScanTimes.TryGetValue(folder, out var lastKnown) || lastWrite > lastKnown)
+				{
+					changed.Add(folder);
+				}
+			}
+
+			return changed;
+		}
+
 		public void Save()
 		{
 			_storage.SaveGames(Games.ToList());

@@ -1,0 +1,36 @@
+﻿<Window x:Class="LaunchPad.View.CustomFolders"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Welcome to LaunchPad"
+        Width="480" Height="420"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize">
+	<Grid Margin="20">
+		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="*"/>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="Auto"/>
+		</Grid.RowDefinitions>
+
+		<TextBlock Grid.Row="0"
+                   Text="Would you like to add custom folders to scan for games?"
+                   FontSize="16" FontWeight="Bold" TextWrapping="Wrap" Margin="0,0,0,8"/>
+		<TextBlock Grid.Row="1"
+                   Text="LaunchPad already scans Steam, Epic, GOG, Ubisoft, EA and Battle.net automatically. Add extra folders below if you keep games elsewhere (e.g. portable or non-store games)."
+                   TextWrapping="Wrap" Opacity="0.8" Margin="0,0,0,12"/>
+
+		<ListBox x:Name="FoldersList" Grid.Row="2" Margin="0,0,0,8"/>
+
+		<StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,16">
+			<Button Content="Add folder..." Click="AddFolder_Click" Margin="0,0,8,0" Padding="10,4"/>
+			<Button Content="Remove selected" Click="RemoveFolder_Click" Padding="10,4"/>
+		</StackPanel>
+
+		<StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+			<Button Content="Skip" Click="Skip_Click" Margin="0,0,8,0" Padding="16,6"/>
+			<Button Content="Start scanning" Click="Continue_Click" Padding="16,6"/>
+		</StackPanel>
+	</Grid>
+</Window>

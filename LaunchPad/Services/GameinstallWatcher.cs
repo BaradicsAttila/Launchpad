@@ -9,17 +9,18 @@ namespace LaunchPad.Services
 	public class GameInstallWatcher : IDisposable
 	{
 		private readonly GameService _gameService;
+		private readonly SettingsService _settingsService;
 		private readonly List<FileSystemWatcher> _watchers = new();
 		private readonly object _debounceLock = new();
 		private Timer? _debounceTimer;
 
 		private static readonly TimeSpan DebounceDelay = TimeSpan.FromSeconds(5);
 
-		public GameInstallWatcher(GameService gameService)
+		public GameInstallWatcher(GameService gameService, SettingsService settingsService)
 		{
 			_gameService = gameService;
+			_settingsService = settingsService;
 		}
-
 		public void Start()
 		{
 			foreach (var steamLibrary in GameScanner.FindSteamLibraries())
@@ -50,6 +51,10 @@ namespace LaunchPad.Services
 				@"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
 				"*.lnk",
 				includeSubdirectories: true);
+			foreach (var customFolder in _settingsService.Current.CustomGameFolders)
+			{
+				WatchCustomFolder(customFolder);
+			}
 		}
 
 		public void WatchCustomFolder(string path)
@@ -68,6 +73,7 @@ namespace LaunchPad.Services
 				EnableRaisingEvents = true
 			};
 			watcher.Created += OnChangeDetected;
+			watcher.Deleted += OnChangeDetected;
 			_watchers.Add(watcher);
 		}
 
@@ -82,6 +88,7 @@ namespace LaunchPad.Services
 				EnableRaisingEvents = true
 			};
 			watcher.Created += OnChangeDetected;
+			watcher.Deleted += OnChangeDetected;
 			_watchers.Add(watcher);
 		}
 
@@ -103,14 +110,12 @@ namespace LaunchPad.Services
 			try
 			{
 				await _gameService.ScanAndMergeAsync();
+				_gameService.MarkMissingGamesAsDeleted();
 			}
 			catch
 			{
-				// Szandekosan elnyeljuk - egy hattersz\u00e1lon futo, esemeny-vezerelt
-				// scanneles nem szabad, hogy elhasalja az alkalmazast.
 			}
 		}
-
 		public void Dispose()
 		{
 			foreach (var watcher in _watchers)

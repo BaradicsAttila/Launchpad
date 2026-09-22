@@ -2,6 +2,7 @@
 using System.Windows;
 using LaunchPad;
 using LaunchPad.Services;
+using LaunchPad.View;
 using LaunchPad.ViewModel;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -18,17 +19,14 @@ namespace LaunchPad
 
 			var services = new ServiceCollection();
 
-			// Storage
 			services.AddSingleton<GameStorage>();
 			services.AddSingleton<SettingsStorage>();
 
-			// Services — singletons so the whole app shares one instance
 			services.AddSingleton<GameService>();
 			services.AddSingleton<SettingsService>();
 			services.AddSingleton<GameScanner>();
 			services.AddSingleton<GameInstallWatcher>();
 
-			// ViewModels — fresh instance per page
 			services.AddTransient<HomeViewModel>();
 			services.AddTransient<LibraryViewModel>();
 			services.AddTransient<SettingsViewModel>();
@@ -37,42 +35,60 @@ namespace LaunchPad
 			ServiceProvider = _serviceProvider;
 
 			var settingsService = _serviceProvider.GetRequiredService<SettingsService>();
-
 			var gameService = _serviceProvider.GetRequiredService<GameService>();
 
-			// Ha a konyvtar meg ures MIELOTT barmilyen scan lefutna, ez az elso
-			// (vagy ures) inditas jele - ekkor kerdezzuk meg a mely keresest.
-			bool isLibraryEmptyBeforeScan = gameService.Games.Count == 0;
+			bool isFirstRun = gameService.Games.Count == 0;
+
+			var progressWindow = new ScanProgressWindow();
+			progressWindow.Show();
 
 			// A gyors scannerek MINDIG lefutnak, minden inditaskor.
-			await gameService.ScanAndMergeAsync();
+			await gameService.ScanAndMergeAsync(progressWindow);
 
-			if (isLibraryEmptyBeforeScan)
+			// Eltunt jatekok jelolese - olcso, csak File.Exists ellenorzes.
+			gameService.MarkMissingGamesAsDeleted();
+
+			if (isFirstRun)
 			{
-				var wantsDeepScan = MessageBox.Show(
-					"Szeretnél egy mélyebb keresést is futtatni? Ez a megadott mappá(ka)t fájlonként átvizsgálja " +
-					"(pl. portable vagy nem Steam/Epic/GOG-os játékokhoz), de tovább tarthat, mint a gyors keresés.",
-					"Első indítás - Mély keresés",
-					MessageBoxButton.YesNo,
-					MessageBoxImage.Question);
+				progressWindow.Hide();
 
-				if (wantsDeepScan == MessageBoxResult.Yes)
+				var setupWindow = new CustomFolders();
+				var result = setupWindow.ShowDialog();
+
+				if (result == true && setupWindow.WantsScan && setupWindow.SelectedFolders.Count > 0)
 				{
-					var folderDialog = new Microsoft.Win32.OpenFolderDialog
-					{
-						Title = "Válaszd ki a mappát a mélykereséshez"
-					};
+					var folders = setupWindow.SelectedFolders.ToList();
 
-					if (folderDialog.ShowDialog() == true)
-					{
-						await gameService.DeepScanAndMergeAsync(new[] { folderDialog.FolderName });
-					}
+					settingsService.Current.CustomGameFolders = folders;
+					foreach (var folder in folders)
+						settingsService.Current.CustomFolderLastScanUtc[folder] = DateTime.UtcNow;
+					settingsService.Save();
+
+					progressWindow.Show();
+					await gameService.DeepScanAndMergeAsync(folders, progressWindow);
+				}
+			}
+			else if (settingsService.Current.CustomGameFolders.Count > 0)
+			{
+				// Nem elso inditas: a mar megadott custom foldereket NEM
+				// scanneljuk ujra automatikusan - csak ha valtozast jeleznek.
+				var changedFolders = gameService.GetChangedCustomFolders(
+					settingsService.Current.CustomGameFolders,
+					settingsService.Current.CustomFolderLastScanUtc);
+
+				if (changedFolders.Count > 0)
+				{
+					progressWindow.Show();
+					await gameService.DeepScanAndMergeAsync(changedFolders, progressWindow);
+
+					foreach (var folder in changedFolders)
+						settingsService.Current.CustomFolderLastScanUtc[folder] = DateTime.UtcNow;
+					settingsService.Save();
 				}
 			}
 
-			// Ettől kezdve a GameInstallWatcher figyeli a háttérben, ha ÚJ játék
-			// települ fel MENET KÖZBEN. Ez is CSAK a gyors scannereket hasznalja,
-			// sosem a deep scan-t.
+			progressWindow.Close();
+
 			var installWatcher = _serviceProvider.GetRequiredService<GameInstallWatcher>();
 			installWatcher.Start();
 
@@ -82,13 +98,15 @@ namespace LaunchPad
 
 		protected override void OnExit(ExitEventArgs e)
 		{
-			// End any active sessions cleanly before the app closes
 			var gameService = _serviceProvider.GetRequiredService<GameService>();
 
 			foreach (var game in gameService.Games.Where(g => g.ActiveSession != null))
 				game.EndSession();
 
 			gameService.Save();
+
+			var settingsService = _serviceProvider.GetRequiredService<SettingsService>();
+			settingsService.Save();   // <-- ezt kell hozzáadni
 
 			var installWatcher = _serviceProvider.GetRequiredService<GameInstallWatcher>();
 			installWatcher.Dispose();

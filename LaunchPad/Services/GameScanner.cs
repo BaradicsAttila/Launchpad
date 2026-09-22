@@ -59,6 +59,62 @@ public class GameScanner
 
 	#endregion
 
+	#region Excluded Path Roots (instant scannerekhez)
+
+	private static readonly string WindowsFolder =
+		Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+
+	private static readonly string AppDataRoaming =
+		Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
+	private static readonly string AppDataLocal =
+		Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+	private static readonly string ProgramFiles =
+		Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+
+	private static readonly string ProgramFilesX86 =
+		Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+
+	// Program Files alatt ELVILEG minden telepitett program ott van (nem csak
+	// jatek), ezert csak az ismert jatek-platform almappakat engedjuk at -
+	// ezek ugyanazok, ahova a GOG/Ubisoft/EA/Steam sajat scannerei is neznek.
+	private static readonly string[] KnownGamePlatformMarkers = new[]
+	{
+		@"\steamapps\common\",
+		@"\gog galaxy\games\",
+		@"\ubisoft game launcher\games\",
+		@"\ea games\",
+		@"\origin games\",
+	};
+
+	private static bool IsKnownGamePlatformPath(string path)
+	{
+		var lower = path.ToLowerInvariant();
+		return KnownGamePlatformMarkers.Any(marker => lower.Contains(marker));
+	}
+
+	private static bool IsUnderExcludedRoot(string path)
+	{
+		if (path.StartsWith(WindowsFolder, StringComparison.OrdinalIgnoreCase)) return true;
+		if (path.StartsWith(AppDataRoaming, StringComparison.OrdinalIgnoreCase)) return true;
+		if (path.StartsWith(AppDataLocal, StringComparison.OrdinalIgnoreCase)) return true;
+
+		bool underProgramFiles =
+			path.StartsWith(ProgramFiles, StringComparison.OrdinalIgnoreCase) ||
+			path.StartsWith(ProgramFilesX86, StringComparison.OrdinalIgnoreCase);
+
+		// Program Files alatt csak akkor engedjuk at, ha ismert jatek-platform
+		// almappaban van - minden mas (Office, bongeszok, launcher-kliensek,
+		// driverek, stb.) kizarva.
+		if (underProgramFiles && !IsKnownGamePlatformPath(path))
+			return true;
+
+		return false;
+	}
+
+	#endregion
+
 	#region Excluded Exe Name Patterns
 
 	// Ha egy exe fajlneve (kiterjesztes nelkul, kisbetuvel) TARTALMAZZA
@@ -80,14 +136,30 @@ public class GameScanner
 		"vcpp", "oalinst"
 	};
 
-	/// <summary>
-	/// True, ha a fajlnev alapjan valoszinuleg NEM a jatek fo exe-je,
-	/// hanem valamilyen telepito/segedprogram/futtatokornyezet.
-	/// </summary>
-	private static bool IsLikelyNonGameExecutable(string fileName)
+	// Mappanevek, amik ha barhol szerepelnek a teljes elerhesi utban,
+	// telepito/futtatokornyezet mappara utalnak (pl. Steam sajat
+	// "Steamworks Common Redistributables" alkalmazasa a _CommonRedist alatt).
+	private static readonly string[] ExcludedPathSegments = new[]
 	{
-		var nameOnly = Path.GetFileNameWithoutExtension(fileName).ToLowerInvariant();
-		return ExcludedExeNamePatterns.Any(pattern => nameOnly.Contains(pattern));
+		"_commonredist", "commonredist", "_redist", "redistributables"
+	};
+
+	/// <summary>
+	/// True, ha a fajlnev VAGY a teljes eleresi ut alapjan valoszinuleg NEM
+	/// a jatek fo exe-je, hanem valamilyen telepito/segedprogram/
+	/// futtatokornyezet.
+	/// </summary>
+	private static bool IsLikelyNonGameExecutable(string filePath)
+	{
+		var nameOnly = Path.GetFileNameWithoutExtension(filePath).ToLowerInvariant();
+		if (ExcludedExeNamePatterns.Any(pattern => nameOnly.Contains(pattern)))
+			return true;
+
+		var lowerPath = filePath.ToLowerInvariant();
+		if (ExcludedPathSegments.Any(segment => lowerPath.Contains(segment)))
+			return true;
+
+		return false;
 	}
 
 	#endregion
@@ -97,7 +169,7 @@ public class GameScanner
 	// -------------------------------------------------------------------------
 
 	/// <summary>
-	/// Runs all instant scans (Start Menu, Registry, Steam, Epic, Ubisoft, EA, GOG, Battle.net).
+	/// Runs all instant scans (Start Menu, Steam, Epic, Ubisoft, EA, GOG, Battle.net).
 	/// Returns in seconds — no waiting.
 	/// </summary>
 	public async Task<List<GameScanResult>> RunInstantScansAsync(IProgress<string>? progress = null)
@@ -128,10 +200,11 @@ public class GameScanner
 			Debug.WriteLine($"[RunInstantScansAsync] StartMenu talalatok: {startMenuResults.Count}");
 			AddRange(results, seen, startMenuResults);
 
-			progress?.Report("Reading Registry...");
-			var registryResults = GetFromRegistry();
-			Debug.WriteLine($"[RunInstantScansAsync] Registry talalatok: {registryResults.Count}");
-			AddRange(results, seen, registryResults);
+			// A Registry-scanner (GetFromRegistry) SZANDEKOSAN ki van kapcsolva:
+			// minden telepitett programot felvett (Office, Chrome, driverek, stb.),
+			// nem csak jatekokat, es valodi extra jatekot nem hozott a StartMenu/
+			// Steam/Epic/GOG/Ubisoft/EA/BattleNet scannerekhez kepest.
+			// A metodus megmaradt lent, ha kesobb megis kellene.
 
 			progress?.Report("Reading Ubisoft Connect...");
 			var ubisoftResults = GetFromUbisoft();
@@ -236,7 +309,13 @@ public class GameScanner
 					if (!target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
 					if (!File.Exists(target)) continue;
 
-					if (IsLikelyNonGameExecutable(Path.GetFileName(target)))
+					if (IsUnderExcludedRoot(target))
+					{
+						Debug.WriteLine($"[GetFromStartMenu] Kihagyva (tiltott mappa): {target}");
+						continue;
+					}
+
+					if (IsLikelyNonGameExecutable(target))
 					{
 						Debug.WriteLine($"[GetFromStartMenu] Kihagyva (nev alapjan telepito/segedprogram): {target}");
 						continue;
@@ -289,6 +368,11 @@ public class GameScanner
 	// -------------------------------------------------------------------------
 	// 2. REGISTRY UNINSTALL KEYS
 	// -------------------------------------------------------------------------
+	//
+	// MEGJEGYZES: ezt a scannert a RunInstantScansAsync jelenleg NEM hivja meg,
+	// mert minden telepitett programot felvesz (nem csak jatekokat). A metodus
+	// megmaradt, arra az esetre, ha kesobb megis szukseg lenne ra (pl. szigorubb
+	// szures mellett).
 
 	private static List<GameScanResult> GetFromRegistry()
 	{
@@ -326,11 +410,12 @@ public class GameScanner
 
 					if (string.IsNullOrEmpty(installLocation)) continue;
 					if (!Directory.Exists(installLocation)) continue;
+					if (IsUnderExcludedRoot(installLocation)) continue;
 
 					// Only scan the top-level install folder (not recursive)
 					// since InstallLocation points directly to the game folder
 					var exe = Directory.EnumerateFiles(installLocation, "*.exe")
-						.Where(f => !IsLikelyNonGameExecutable(Path.GetFileName(f)))
+						.Where(f => !IsLikelyNonGameExecutable(f))
 						.Select(f => new FileInfo(f))
 						.OrderByDescending(f => f.Length)
 						.FirstOrDefault();
@@ -405,7 +490,7 @@ public class GameScanner
 					}
 
 					var candidates = Directory.EnumerateFiles(gamePath, "*.exe", SearchOption.AllDirectories)
-						.Where(f => !IsLikelyNonGameExecutable(Path.GetFileName(f)))
+						.Where(f => !IsLikelyNonGameExecutable(f))
 						.Select(f => new FileInfo(f))
 						.OrderByDescending(f => f.Length)
 						.ToList();
@@ -525,7 +610,7 @@ public class GameScanner
 
 				// Fallback, ha a LaunchExecutable hianyzik vagy egy wrapper-re mutat
 				exePath ??= Directory.EnumerateFiles(installPath, "*.exe", SearchOption.AllDirectories)
-					.Where(f => !IsLikelyNonGameExecutable(Path.GetFileName(f)))
+					.Where(f => !IsLikelyNonGameExecutable(f))
 					.Select(f => new FileInfo(f))
 					.OrderByDescending(f => f.Length)
 					.FirstOrDefault()?.FullName;
@@ -572,7 +657,7 @@ public class GameScanner
 			try
 			{
 				var exe = Directory.EnumerateFiles(gameFolder, "*.exe", SearchOption.AllDirectories)
-					.Where(f => !IsLikelyNonGameExecutable(Path.GetFileName(f)))
+					.Where(f => !IsLikelyNonGameExecutable(f))
 					.Select(f => new FileInfo(f))
 					.OrderByDescending(f => f.Length)
 					.FirstOrDefault();
@@ -628,7 +713,7 @@ public class GameScanner
 				try
 				{
 					var exe = Directory.EnumerateFiles(gameFolder, "*.exe", SearchOption.AllDirectories)
-						.Where(f => !IsLikelyNonGameExecutable(Path.GetFileName(f)))
+						.Where(f => !IsLikelyNonGameExecutable(f))
 						.Select(f => new FileInfo(f))
 						.OrderByDescending(f => f.Length)
 						.FirstOrDefault();
@@ -676,7 +761,7 @@ public class GameScanner
 			try
 			{
 				var exe = Directory.EnumerateFiles(gameFolder, "*.exe", SearchOption.AllDirectories)
-					.Where(f => !IsLikelyNonGameExecutable(Path.GetFileName(f)))
+					.Where(f => !IsLikelyNonGameExecutable(f))
 					.Select(f => new FileInfo(f))
 					.OrderByDescending(f => f.Length)
 					.FirstOrDefault();
@@ -733,7 +818,7 @@ public class GameScanner
 			try
 			{
 				var exe = Directory.EnumerateFiles(root, "*.exe", SearchOption.AllDirectories)
-					.Where(f => !IsLikelyNonGameExecutable(Path.GetFileName(f)))
+					.Where(f => !IsLikelyNonGameExecutable(f))
 					.Select(f => new FileInfo(f))
 					.OrderByDescending(f => f.Length)
 					.FirstOrDefault();
@@ -776,7 +861,7 @@ public class GameScanner
 
 		foreach (var f in files)
 		{
-			if (IsLikelyNonGameExecutable(Path.GetFileName(f))) continue;
+			if (IsLikelyNonGameExecutable(f)) continue;
 			yield return f;
 		}
 
@@ -793,6 +878,7 @@ public class GameScanner
 	private static bool ShouldExclude(string path)
 	{
 		if (ExcludedFolders.Contains(path)) return true;
+		if (IsUnderExcludedRoot(path)) return true;
 
 		if (path.Contains(@"\AppData\", StringComparison.OrdinalIgnoreCase))
 		{
@@ -802,7 +888,6 @@ public class GameScanner
 
 		return false;
 	}
-
 	// -------------------------------------------------------------------------
 	// HELPERS
 	// -------------------------------------------------------------------------

@@ -15,5 +15,7 @@ namespace LaunchPad.Model
 		public string BackgroundSecondary { get; set; } = "#1A1A1A";
 		public string TitlebarBackground { get; set; } = "#444444";
 		public string SelectedMenuItemBackground { get; set; } = "#408A2BE2";
+		public List<string> CustomGameFolders { get; set; } = new();
+		public Dictionary<string, DateTime> CustomFolderLastScanUtc { get; set; } = new();
 	}
 }

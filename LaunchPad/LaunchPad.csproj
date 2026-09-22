@@ -10,10 +10,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Remove="Resources\Data\Settings.json" />
     <None Remove="Resources\Fonts\Phosphor\fill\Phosphor-Fill.ttf" />
     <None Remove="Resources\Fonts\Phosphor\regular\Phosphor.ttf" />
     <None Remove="Resources\Images\Lp_Ikon.png" />
     <None Remove="Resources\Images\Preview.jpg" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Data\Settings.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>
@@ -46,11 +53,8 @@
     <None Update="Resources\Data\Games.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="Resources\Data\Settings.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
     <None Update="Resources\Data\TestGames.json">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </None>
   </ItemGroup>
 
