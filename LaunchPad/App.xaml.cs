@@ -1,4 +1,5 @@
-﻿using System.Linq;
+﻿using System;
+using System.Linq;
 using System.Windows;
 using LaunchPad;
 using LaunchPad.Services;
@@ -8,110 +9,120 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace LaunchPad
 {
-	public partial class App : Application
-	{
-		private ServiceProvider _serviceProvider;
-		public static ServiceProvider ServiceProvider { get; private set; }
+    public partial class App : Application
+    {
+        private ServiceProvider _serviceProvider;
+        public static ServiceProvider ServiceProvider { get; private set; }
 
-		protected override async void OnStartup(StartupEventArgs e)
-		{
-			base.OnStartup(e);
+        protected override async void OnStartup(StartupEventArgs e)
+        {
+            base.OnStartup(e);
 
-			var services = new ServiceCollection();
+            // Amig a vegleges MainWindow meg nem jelenik, ne alljon le az app csak
+            // azert, mert kozben (pl. a progressWindow.Close() es a mainWindow.Show()
+            // kozott) pillanatnyilag nincs nyitva ablak. Alapertelmezesben
+            // (ShutdownMode.OnLastWindowClose) ez azonnali kilepest okozna.
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-			services.AddSingleton<GameStorage>();
-			services.AddSingleton<SettingsStorage>();
+            var services = new ServiceCollection();
 
-			services.AddSingleton<GameService>();
-			services.AddSingleton<SettingsService>();
-			services.AddSingleton<GameScanner>();
-			services.AddSingleton<GameInstallWatcher>();
+            services.AddSingleton<GameStorage>();
+            services.AddSingleton<SettingsStorage>();
 
-			services.AddTransient<HomeViewModel>();
-			services.AddTransient<LibraryViewModel>();
-			services.AddTransient<SettingsViewModel>();
+            services.AddSingleton<GameService>();
+            services.AddSingleton<SettingsService>();
+            services.AddSingleton<GameScanner>();
+            services.AddSingleton<GameInstallWatcher>();
 
-			_serviceProvider = services.BuildServiceProvider();
-			ServiceProvider = _serviceProvider;
+            services.AddTransient<HomeViewModel>();
+            services.AddTransient<LibraryViewModel>();
+            services.AddTransient<SettingsViewModel>();
 
-			var settingsService = _serviceProvider.GetRequiredService<SettingsService>();
-			var gameService = _serviceProvider.GetRequiredService<GameService>();
+            _serviceProvider = services.BuildServiceProvider();
+            ServiceProvider = _serviceProvider;
 
-			bool isFirstRun = gameService.Games.Count == 0;
+            var settingsService = _serviceProvider.GetRequiredService<SettingsService>();
+            var gameService = _serviceProvider.GetRequiredService<GameService>();
 
-			var progressWindow = new ScanProgressWindow();
-			progressWindow.Show();
+            bool isFirstRun = gameService.Games.Count == 0;
 
-			// A gyors scannerek MINDIG lefutnak, minden inditaskor.
-			await gameService.ScanAndMergeAsync(progressWindow);
+            var progressWindow = new ScanProgressWindow();
+            progressWindow.Show();
 
-			// Eltunt jatekok jelolese - olcso, csak File.Exists ellenorzes.
-			gameService.MarkMissingGamesAsDeleted();
+            // A gyors scannerek MINDIG lefutnak, minden inditaskor.
+            await gameService.ScanAndMergeAsync(progressWindow);
 
-			if (isFirstRun)
-			{
-				progressWindow.Hide();
+            // Eltunt jatekok jelolese - olcso, csak File.Exists ellenorzes.
+            gameService.MarkMissingGamesAsDeleted();
 
-				var setupWindow = new CustomFolders();
-				var result = setupWindow.ShowDialog();
+            if (isFirstRun)
+            {
+                progressWindow.Hide();
 
-				if (result == true && setupWindow.WantsScan && setupWindow.SelectedFolders.Count > 0)
-				{
-					var folders = setupWindow.SelectedFolders.ToList();
+                var setupWindow = new CustomFolders();
+                var result = setupWindow.ShowDialog();
 
-					settingsService.Current.CustomGameFolders = folders;
-					foreach (var folder in folders)
-						settingsService.Current.CustomFolderLastScanUtc[folder] = DateTime.UtcNow;
-					settingsService.Save();
+                if (result == true && setupWindow.WantsScan && setupWindow.SelectedFolders.Count > 0)
+                {
+                    var folders = setupWindow.SelectedFolders.ToList();
 
-					progressWindow.Show();
-					await gameService.DeepScanAndMergeAsync(folders, progressWindow);
-				}
-			}
-			else if (settingsService.Current.CustomGameFolders.Count > 0)
-			{
-				// Nem elso inditas: a mar megadott custom foldereket NEM
-				// scanneljuk ujra automatikusan - csak ha valtozast jeleznek.
-				var changedFolders = gameService.GetChangedCustomFolders(
-					settingsService.Current.CustomGameFolders,
-					settingsService.Current.CustomFolderLastScanUtc);
+                    settingsService.Current.CustomGameFolders = folders;
+                    foreach (var folder in folders)
+                        settingsService.Current.CustomFolderLastScanUtc[folder] = DateTime.UtcNow;
+                    settingsService.Save();
 
-				if (changedFolders.Count > 0)
-				{
-					progressWindow.Show();
-					await gameService.DeepScanAndMergeAsync(changedFolders, progressWindow);
+                    progressWindow.Show();
+                    await gameService.DeepScanAndMergeAsync(folders, progressWindow);
+                }
+            }
+            else if (settingsService.Current.CustomGameFolders.Count > 0)
+            {
+                // Nem elso inditas: a mar megadott custom foldereket NEM
+                // scanneljuk ujra automatikusan - csak ha valtozast jeleznek.
+                var changedFolders = gameService.GetChangedCustomFolders(
+                    settingsService.Current.CustomGameFolders,
+                    settingsService.Current.CustomFolderLastScanUtc);
 
-					foreach (var folder in changedFolders)
-						settingsService.Current.CustomFolderLastScanUtc[folder] = DateTime.UtcNow;
-					settingsService.Save();
-				}
-			}
+                if (changedFolders.Count > 0)
+                {
+                    progressWindow.Show();
+                    await gameService.DeepScanAndMergeAsync(changedFolders, progressWindow);
 
-			progressWindow.Close();
+                    foreach (var folder in changedFolders)
+                        settingsService.Current.CustomFolderLastScanUtc[folder] = DateTime.UtcNow;
+                    settingsService.Save();
+                }
+            }
 
-			var installWatcher = _serviceProvider.GetRequiredService<GameInstallWatcher>();
-			installWatcher.Start();
+            progressWindow.Close();
 
-			var mainWindow = new MainWindow();
-			mainWindow.Show();
-		}
+            var installWatcher = _serviceProvider.GetRequiredService<GameInstallWatcher>();
+            installWatcher.Start();
 
-		protected override void OnExit(ExitEventArgs e)
-		{
-			var gameService = _serviceProvider.GetRequiredService<GameService>();
+            var mainWindow = new MainWindow();
+            Application.Current.MainWindow = mainWindow;   
+                                                           
+            mainWindow.Show();
 
-			foreach (var game in gameService.Games.Where(g => g.ActiveSession != null))
-				game.EndSession();
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
+        }
 
-			gameService.Save();
+        protected override void OnExit(ExitEventArgs e)
+        {
+            var gameService = _serviceProvider.GetRequiredService<GameService>();
 
-			var settingsService = _serviceProvider.GetRequiredService<SettingsService>();
-			settingsService.Save();   // <-- ezt kell hozzáadni
+            foreach (var game in gameService.Games.Where(g => g.ActiveSession != null))
+                game.EndSession();
 
-			var installWatcher = _serviceProvider.GetRequiredService<GameInstallWatcher>();
-			installWatcher.Dispose();
+            gameService.Save();
 
-			base.OnExit(e);
-		}
-	}
+            var settingsService = _serviceProvider.GetRequiredService<SettingsService>();
+            settingsService.Save();
+
+            var installWatcher = _serviceProvider.GetRequiredService<GameInstallWatcher>();
+            installWatcher.Dispose();
+
+            base.OnExit(e);
+        }
+    }
 }

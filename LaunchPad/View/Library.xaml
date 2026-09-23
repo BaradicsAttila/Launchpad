@@ -10,5 +10,26 @@
 		<Button Content="★"
         Command="{Binding DataContext.ToggleFavouriteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
         CommandParameter="{Binding}"/>
-	</Grid>
+        <MenuItem Header="Exclude this"
+          Command="{Binding DataContext.ExcludeGameCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+          CommandParameter="{Binding}"/>
+        <MenuItem Header="Change exe path..."
+          Command="{Binding DataContext.ChangeExePathCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+          CommandParameter="{Binding}"/>
+        <Button x:Name="ExcludeToggleButton"
+        Content="Exclude"
+        Command="{Binding DataContext.ExcludeGameCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+        CommandParameter="{Binding}">
+            <Button.Style>
+                <Style TargetType="Button">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsExcluded}" Value="True">
+                            <Setter Property="Content" Value="Include"/>
+                            <Setter Property="Command" Value="{Binding DataContext.IncludeGameCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Button.Style>
+        </Button>
+    </Grid>
 </UserControl>

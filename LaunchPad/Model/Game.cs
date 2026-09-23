@@ -22,7 +22,9 @@ namespace LaunchPad.Model
 		private bool isFavourite;
 		[ObservableProperty]
 		private bool isDeleted;
-		public List<Session> Sessions { get; set; } = new();
+        [ObservableProperty]
+        private bool _isExcluded;
+        public List<Session> Sessions { get; set; } = new();
 		[JsonIgnore]
 		public int TotalPlaytimeSeconds => Sessions.Sum(s => s.DurationSeconds);
 		[JsonIgnore]

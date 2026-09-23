@@ -17,5 +17,6 @@ namespace LaunchPad.Model
 		public string SelectedMenuItemBackground { get; set; } = "#408A2BE2";
 		public List<string> CustomGameFolders { get; set; } = new();
 		public Dictionary<string, DateTime> CustomFolderLastScanUtc { get; set; } = new();
-	}
+        public List<string> ExcludedGamePaths { get; set; } = new();
+    }
 }
