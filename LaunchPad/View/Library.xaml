@@ -4,10 +4,11 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:local="clr-namespace:LaunchPad.View"
+             xmlns:helpers="clr-namespace:LaunchPad.Helpers"
              mc:Ignorable="d" 
              d:DesignHeight="450" d:DesignWidth="800">
     <Grid>
-		<Button Content="★"
+		<!--<Button Content="★"
         Command="{Binding DataContext.ToggleFavouriteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
         CommandParameter="{Binding}"/>
         <MenuItem Header="Exclude this"
@@ -30,6 +31,46 @@
                     </Style.Triggers>
                 </Style>
             </Button.Style>
-        </Button>
+        </Button>-->
+        <Grid.RowDefinitions>
+            <RowDefinition Height="50"/>
+            <RowDefinition Height="50"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <Grid Width="450" HorizontalAlignment="Right" Grid.Row="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="20"/>
+                <RowDefinition Height="30"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="250"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="100"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="50"/>
+                <ColumnDefinition Width="30"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Foreground="Wheat" Text="Total Games: 1" Grid.Column="0" Grid.Row="0"/>
+            <TextBlock Grid.Column="2" Grid.Row="0"/>
+            <TextBlock Grid.Column="4" Grid.Row="0"/>
+            <Border
+                CornerRadius="5"
+                Background="{DynamicResource AppTitlebarBackground}"
+                BorderBrush="{DynamicResource AppFontColorPrimary}"
+                BorderThickness="1"
+                Grid.Column="0" 
+                Grid.Row="1"
+                ClipToBounds="True">
+                <TextBox helpers:TextBoxHelper.Placeholder="Search..."
+                         Background="Transparent"
+                         VerticalContentAlignment="Center" 
+                         Foreground="{DynamicResource AppFontColorPrimary}" 
+                         BorderThickness="0" 
+                         FontSize="16"/>
+                
+            </Border>
+            <ComboBox Grid.Column="2" Grid.Row="1"/>
+            <ComboBox Grid.Column="4" Grid.Row="1"/>
+        </Grid>
     </Grid>
 </UserControl>
