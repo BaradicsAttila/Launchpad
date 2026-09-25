@@ -10,207 +10,261 @@ using System.IO;
 
 namespace LaunchPad.Services
 {
-    public class GameService
-    {
-        private readonly GameStorage _storage;
-        private readonly GameScanner _scanner;
-        private readonly SettingsService _settingsService;
-        private readonly System.Timers.Timer _safetyTimer;
-        public ObservableCollection<Game> Games { get; } = new();
+	public class GameService : IDisposable
+	{
+		private readonly GameStorage _storage;
+		private readonly GameScanner _scanner;
+		private readonly SettingsService _settingsService;
 
-        public int TotalGamesCount => Games.Count;
+		// Gyors, csak File.Exists-et ellenorzo timer - torles/visszatoltes
+		// eszleleset vegzi, semmilyen mentest nem trigerel feleslegesen.
+		private readonly System.Timers.Timer _safetyTimer;
 
-        public GameService(GameStorage storage, GameScanner scanner, SettingsService settingsService)
-        {
-            _storage = storage;
-            _scanner = scanner;
-            _settingsService = settingsService;
+		// Ritkabb timer, ami az aktiv jatszesi session-oket menti biztonsagi
+		// mentaskent, ha az app kozben osszeomlana.
+		private readonly System.Timers.Timer _sessionFlushTimer;
 
-            var loaded = _storage.LoadGames();
-            foreach (var game in loaded)
-            {
-                SubscribeToGame(game);
-                Games.Add(game);
-            }
-            Games.CollectionChanged += OnCollectionChanged;
-            _safetyTimer = new System.Timers.Timer(30000);
-            _safetyTimer.Elapsed += (_, _) => FlushActiveSessions();
-            _safetyTimer.AutoReset = true;
-            _safetyTimer.Start();
-        }
-        public async Task ScanAndMergeAsync(IProgress<string>? progress = null)
-        {
-            var results = await _scanner.RunInstantScansAsync(progress);
-            MergeWithScanResults(results);
-            Save();
-        }
+		public ObservableCollection<Game> Games { get; } = new();
 
-        public async Task DeepScanAndMergeAsync(IEnumerable<string> folders, IProgress<string>? progress = null)
-        {
-            var results = await _scanner.ScanFoldersAsync(folders, progress);
-            MergeWithScanResults(results);
-            Save();
-        }
+		public int TotalGamesCount => Games.Count;
 
-        private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
-        {
-            if (e.NewItems != null)
-            {
-                foreach (Game game in e.NewItems)
-                {
-                    SubscribeToGame(game);
-                }
-            }
-            Save();
-        }
-        private void SubscribeToGame(Game game)
-        {
-            game.PropertyChanged += (_, _) => Save();
-        }
+		public GameService(GameStorage storage, GameScanner scanner, SettingsService settingsService)
+		{
+			_storage = storage;
+			_scanner = scanner;
+			_settingsService = settingsService;
 
-        public void MergeWithScanResults(List<GameScanResult> scanResults)
-        {
-            var excludedPaths = _settingsService.Current.ExcludedGamePaths;
+			var loaded = _storage.LoadGames();
+			foreach (var game in loaded)
+			{
+				SubscribeToGame(game);
+				Games.Add(game);
+			}
+			Games.CollectionChanged += OnCollectionChanged;
 
-            foreach (var result in scanResults)
-            {
-                // A felhasznalo altal kifejezetten kizart (vagy "Change exe path"-
-                // szal lecserelt) path-okat egyetlen scanner sem hozhatja vissza.
-                if (excludedPaths.Any(p => string.Equals(p, result.ExePath, StringComparison.OrdinalIgnoreCase)))
-                    continue;
+			_safetyTimer = new System.Timers.Timer(3000);
+			_safetyTimer.Elapsed += (_, _) =>
+			{
+				MarkMissingGamesAsDeleted();
+				RestoreReappearedGames();
+			};
+			_safetyTimer.AutoReset = true;
+			_safetyTimer.Start();
 
-                // Kizart jatekokat nev alapjan sem "elesztunk fel" automatikusan -
-                // ha ugyanaz a nev egy UJ path-on bukkan fel, az egy uj bejegyzes
-                // lesz, nem irja felul a mar kizart regi rekordot.
-                var existing = Games.FirstOrDefault(g =>
-                    !g.IsExcluded &&
-                    string.Equals(g.Name, result.GameName, StringComparison.OrdinalIgnoreCase));
+			_sessionFlushTimer = new System.Timers.Timer(30000);
+			_sessionFlushTimer.Elapsed += (_, _) => FlushActiveSessions();
+			_sessionFlushTimer.AutoReset = true;
+			_sessionFlushTimer.Start();
+		}
+		public async Task ScanAndMergeAsync(IProgress<string>? progress = null)
+		{
+			var results = await _scanner.RunInstantScansAsync(progress);
+			MergeWithScanResults(results);
+			Save();
+		}
 
-                if (existing != null)
-                {
-                    if (!string.Equals(existing.Source, result.ExePath, StringComparison.OrdinalIgnoreCase))
-                        existing.Source = result.ExePath;
-                }
-                else
-                {
-                    Games.Add(new Game(
-                    name: result.GameName,
-                    source: result.ExePath,
-                    isFavourite: false,
-                    isDeleted: false,
-                    sessions: null
-                    ));
-                }
-            }
-        }
+		public async Task DeepScanAndMergeAsync(IEnumerable<string> folders, IProgress<string>? progress = null)
+		{
+			var results = await _scanner.ScanFoldersAsync(folders, progress);
+			MergeWithScanResults(results);
+			Save();
+		}
 
-        private void FlushActiveSessions()
-        {
-            var activeSessions = Games.Where(g => g.ActiveSession != null).ToList();
-            if (!activeSessions.Any()) return;
-            foreach (var game in activeSessions) game.FlushSession();
-            Save();
+		private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+		{
+			if (e.NewItems != null)
+			{
+				foreach (Game game in e.NewItems)
+				{
+					SubscribeToGame(game);
+				}
+			}
+			Save();
+		}
+		private void SubscribeToGame(Game game)
+		{
+			game.PropertyChanged += (_, _) => Save();
+		}
 
-        }
+		public void MergeWithScanResults(List<GameScanResult> scanResults)
+		{
+			var excludedPaths = _settingsService.Current.ExcludedGamePaths;
 
-        public void MarkMissingGamesAsDeleted()
-        {
-            bool anyChanged = false;
+			foreach (var result in scanResults)
+			{
+				// A felhasznalo altal kifejezetten kizart (vagy "Change exe path"-
+				// szal lecserelt) path-okat egyetlen scanner sem hozhatja vissza.
+				if (excludedPaths.Any(p => string.Equals(p, result.ExePath, StringComparison.OrdinalIgnoreCase)))
+					continue;
 
-            foreach (var game in Games.Where(g => !g.IsDeleted && !g.IsExcluded))
-            {
-                if (!File.Exists(game.Source))
-                {
-                    game.IsDeleted = true;
-                    anyChanged = true;
-                }
-            }
+				// Kizart jatekokat nev alapjan sem "elesztunk fel" automatikusan -
+				// ha ugyanaz a nev egy UJ path-on bukkan fel, az egy uj bejegyzes
+				// lesz, nem irja felul a mar kizart regi rekordot.
+				var existing = Games.FirstOrDefault(g =>
+					!g.IsExcluded &&
+					string.Equals(g.Name, result.GameName, StringComparison.OrdinalIgnoreCase));
 
-            if (anyChanged) Save();
-        }
+				if (existing != null)
+				{
+					if (!string.Equals(existing.Source, result.ExePath, StringComparison.OrdinalIgnoreCase))
+						existing.Source = result.ExePath;
 
-        public List<string> GetChangedCustomFolders(
-            List<string> customFolders,
-            Dictionary<string, DateTime> lastScanTimes)
-        {
-            var changed = new List<string>();
+					// A jatekot korabban torolve jeloltuk (a fajl eltunt), de a
+					// scanner most ujra megtalalta - tehat visszatoltottek.
+					if (existing.IsDeleted)
+						existing.IsDeleted = false;
+				}
+				else
+				{
+					Games.Add(new Game(
+					name: result.GameName,
+					source: result.ExePath,
+					isFavourite: false,
+					isDeleted: false,
+					sessions: null
+					));
+				}
+			}
+		}
 
-            foreach (var folder in customFolders)
-            {
-                if (!Directory.Exists(folder)) continue;
+		private void FlushActiveSessions()
+		{
+			var activeSessions = Games.Where(g => g.ActiveSession != null).ToList();
+			if (!activeSessions.Any()) return;
+			foreach (var game in activeSessions) game.FlushSession();
+			Save();
 
-                var lastWrite = Directory.GetLastWriteTimeUtc(folder);
+		}
 
-                if (!lastScanTimes.TryGetValue(folder, out var lastKnown) || lastWrite > lastKnown)
-                {
-                    changed.Add(folder);
-                }
-            }
+		public void MarkMissingGamesAsDeleted()
+		{
+			bool anyChanged = false;
 
-            return changed;
-        }
+			foreach (var game in Games.Where(g => !g.IsDeleted && !g.IsExcluded))
+			{
+				if (!File.Exists(game.Source))
+				{
+					game.IsDeleted = true;
+					anyChanged = true;
+				}
+			}
 
-        /// <summary>
-        /// A jatekot "kizartra" allitja: mostantol nem jelenik meg a Libraryban,
-        /// es a jelenlegi Source path-ja felkerul a kizart utak listajara, hogy
-        /// egyetlen jovobeli scan se hozza vissza/hozza letre ujra ugyanezen
-        /// az uton. Maga a rekord (statisztikak, session-ok) megmarad a
-        /// Games.json-ban.
-        /// </summary>
-        public void ExcludeGame(Game game)
-        {
-            AddExcludedPath(game.Source);
-            game.IsExcluded = true;
+			if (anyChanged) Save();
+		}
 
-            _settingsService.Save();
-            Save();
-        }
-        public void IncludeGame(Game game)
-        {
-            var excluded = _settingsService.Current.ExcludedGamePaths;
-            excluded.RemoveAll(p => string.Equals(p, game.Source, StringComparison.OrdinalIgnoreCase));
+		/// <summary>
+		/// A korabban torolve jelolt jatekokat visszaallitja, ha a Source
+		/// path-juk idokozben ujra letezik (pl. a felhasznalo visszatoltotte
+		/// ugyanoda a jatekot). Fuggetlen a FileSystemWatcher-ektol, ezert
+		/// akkor is mukodik, ha egy mappa torlese/ujraletrehozasa miatt a
+		/// watcher esemenyei elvesznek.
+		/// </summary>
+		public void RestoreReappearedGames()
+		{
+			bool anyChanged = false;
 
-            game.IsExcluded = false;
+			foreach (var game in Games.Where(g => g.IsDeleted && !g.IsExcluded))
+			{
+				if (File.Exists(game.Source))
+				{
+					game.IsDeleted = false;
+					anyChanged = true;
+				}
+			}
 
-            _settingsService.Save();
-            Save();
-        }
+			if (anyChanged) Save();
+		}
 
-        /// <summary>
-        /// Lecsereli a jatek inditando exe-jet egy uj, felhasznalo altal
-        /// kivalasztott path-ra. A REGI path felkerul a kizart utak listajara,
-        /// hogy egy kesobbi scan (ami meg mindig megtalalhatja a regi exe-t,
-        /// pl. ha az meg mindig a lemezen van) ne irja felul vissza a Source-ot.
-        /// Az uj path kozvetlenul kerul beallitasra, nem a scan-merge-en
-        /// keresztul, igy a regi es az uj path sosem utkozhet.
-        /// </summary>
-        public void ChangeGameExecutable(Game game, string newExePath)
-        {
-            var oldPath = game.Source;
+		public List<string> GetChangedCustomFolders(
+			List<string> customFolders,
+			Dictionary<string, DateTime> lastScanTimes)
+		{
+			var changed = new List<string>();
 
-            if (!string.Equals(oldPath, newExePath, StringComparison.OrdinalIgnoreCase))
-                AddExcludedPath(oldPath);
+			foreach (var folder in customFolders)
+			{
+				if (!Directory.Exists(folder)) continue;
 
-            game.Source = newExePath;
+				var lastWrite = Directory.GetLastWriteTimeUtc(folder);
 
-            _settingsService.Save();
-            Save();
-        }
+				if (!lastScanTimes.TryGetValue(folder, out var lastKnown) || lastWrite > lastKnown)
+				{
+					changed.Add(folder);
+				}
+			}
 
-        private void AddExcludedPath(string path)
-        {
-            if (string.IsNullOrWhiteSpace(path)) return;
+			return changed;
+		}
 
-            var excluded = _settingsService.Current.ExcludedGamePaths;
-            bool alreadyThere = excluded.Any(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+		/// <summary>
+		/// A jatekot "kizartra" allitja: mostantol nem jelenik meg a Libraryban,
+		/// es a jelenlegi Source path-ja felkerul a kizart utak listajara, hogy
+		/// egyetlen jovobeli scan se hozza vissza/hozza letre ujra ugyanezen
+		/// az uton. Maga a rekord (statisztikak, session-ok) megmarad a
+		/// Games.json-ban.
+		/// </summary>
+		public void ExcludeGame(Game game)
+		{
+			AddExcludedPath(game.Source);
+			game.IsExcluded = true;
 
-            if (!alreadyThere) excluded.Add(path);
-        }
+			_settingsService.Save();
+			Save();
+		}
+		public void IncludeGame(Game game)
+		{
+			var excluded = _settingsService.Current.ExcludedGamePaths;
+			excluded.RemoveAll(p => string.Equals(p, game.Source, StringComparison.OrdinalIgnoreCase));
+
+			game.IsExcluded = false;
+
+			_settingsService.Save();
+			Save();
+		}
+
+		/// <summary>
+		/// Lecsereli a jatek inditando exe-jet egy uj, felhasznalo altal
+		/// kivalasztott path-ra. A REGI path felkerul a kizart utak listajara,
+		/// hogy egy kesobbi scan (ami meg mindig megtalalhatja a regi exe-t,
+		/// pl. ha az meg mindig a lemezen van) ne irja felul vissza a Source-ot.
+		/// Az uj path kozvetlenul kerul beallitasra, nem a scan-merge-en
+		/// keresztul, igy a regi es az uj path sosem utkozhet.
+		/// </summary>
+		public void ChangeGameExecutable(Game game, string newExePath)
+		{
+			var oldPath = game.Source;
+
+			if (!string.Equals(oldPath, newExePath, StringComparison.OrdinalIgnoreCase))
+				AddExcludedPath(oldPath);
+
+			game.Source = newExePath;
+
+			_settingsService.Save();
+			Save();
+		}
+
+		private void AddExcludedPath(string path)
+		{
+			if (string.IsNullOrWhiteSpace(path)) return;
+
+			var excluded = _settingsService.Current.ExcludedGamePaths;
+			bool alreadyThere = excluded.Any(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+
+			if (!alreadyThere) excluded.Add(path);
+		}
 
 
-        public void Save()
-        {
-            _storage.SaveGames(Games.ToList());
-        }
-    }
+		public void Save()
+		{
+			_storage.SaveGames(Games.ToList());
+		}
+
+		public void Dispose()
+		{
+			_safetyTimer?.Stop();
+			_safetyTimer?.Dispose();
+			_sessionFlushTimer?.Stop();
+			_sessionFlushTimer?.Dispose();
+		}
+	}
 }
