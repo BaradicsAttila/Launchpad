@@ -236,7 +236,10 @@
                 <ColumnDefinition Width="50"/>
                 <ColumnDefinition Width="30"/>
             </Grid.ColumnDefinitions>
-            <TextBlock Foreground="Wheat" Text="Total Games: 1" Grid.Column="0" Grid.Row="0"/>
+            <TextBlock Foreground="{DynamicResource AppFontColorPrimary}" Grid.Column="0" Grid.Row="0">
+                <Run Text="Total games: "/>
+                <Run Text="{Binding Games.Count, Mode=OneWay}"/>
+            </TextBlock>
             <TextBlock Grid.Column="2" Grid.Row="0"/>
             <TextBlock Grid.Column="4" Grid.Row="0"/>
             <Border

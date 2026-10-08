@@ -1,4 +1,6 @@
-﻿using System;
+﻿using LaunchPad.ViewModel;
+using Microsoft.Extensions.DependencyInjection;
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Windows;
@@ -21,6 +23,7 @@ namespace LaunchPad.View
         public Library()
         {
             InitializeComponent();
+            DataContext = App.ServiceProvider.GetRequiredService<LibraryViewModel>();
         }
     }
 }
