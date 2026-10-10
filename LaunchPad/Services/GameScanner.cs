@@ -596,7 +596,7 @@ public class GameScanner
                 // legmegbizhatobb forras, itt nincs is szukseg nev-alapu szuresre.
                 if (!string.IsNullOrEmpty(launchExe))
                 {
-                    var fullPath = Path.Combine(installPath, launchExe);
+					var fullPath = Path.GetFullPath(Path.Combine(installPath, launchExe));
                     if (File.Exists(fullPath))
                         exePath = fullPath;
                 }

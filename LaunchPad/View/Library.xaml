@@ -8,7 +8,9 @@
              mc:Ignorable="d" 
              d:DesignHeight="450" d:DesignWidth="800">
     <UserControl.Resources>
-
+		<Style TargetType="TextBlock">
+			<Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
+		</Style>
         <!-- Tab-os fókusz pontozott kerete -->
         <Style x:Key="FocusVisual">
             <Setter Property="Control.Template">
@@ -61,8 +63,9 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type ToggleButton}">
                         <Border x:Name="templateRoot"
-                            Background="{StaticResource ComboBox.Static.Background}"
-                            BorderBrush="{StaticResource ComboBox.Static.Border}"
+                            CornerRadius="5"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             SnapsToDevicePixels="true">
                             <Border x:Name="splitBorder"
@@ -72,7 +75,7 @@
                                 Width="{DynamicResource {x:Static SystemParameters.VerticalScrollBarWidthKey}}">
                                 <Path x:Name="arrow"
                                   Data="F1 M 0,0 L 2.667,2.66665 L 5.3334,0 L 5.3334,-1.78168 L 2.6667,0.88501 L0,-1.78168 L0,0 Z"
-                                  Fill="{StaticResource ComboBox.Static.Glyph}"
+                                  Fill="{TemplateBinding Foreground}"
                                   HorizontalAlignment="Center" Margin="0" VerticalAlignment="Center"/>
                             </Border>
                         </Border>
@@ -178,9 +181,9 @@
         <!-- Alapértékek, ezt adod a ComboBoxnak -->
         <Style x:Key="ComboBoxStyle1" TargetType="{x:Type ComboBox}">
             <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}"/>
-            <Setter Property="Background" Value="{StaticResource ComboBox.Static.Background}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource ComboBox.Static.Border}"/>
-            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"/>
+			<Setter Property="Background" Value="{DynamicResource AppTitlebarBackground}"/>
+			<Setter Property="BorderBrush" Value="{DynamicResource AppFontColoPromary}"/>
+			<Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto"/>
             <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
@@ -223,7 +226,7 @@
             <RowDefinition Height="50"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
-        <Grid Width="450" HorizontalAlignment="Right" Grid.Row="1">
+        <Grid Width="480" HorizontalAlignment="Right" Grid.Row="1">
             <Grid.RowDefinitions>
                 <RowDefinition Height="20"/>
                 <RowDefinition Height="30"/>
@@ -232,16 +235,17 @@
                 <ColumnDefinition Width="250"/>
                 <ColumnDefinition Width="10"/>
                 <ColumnDefinition Width="100"/>
+                <ColumnDefinition Width="20"/>
                 <ColumnDefinition Width="10"/>
                 <ColumnDefinition Width="50"/>
                 <ColumnDefinition Width="30"/>
             </Grid.ColumnDefinitions>
-            <TextBlock Foreground="{DynamicResource AppFontColorPrimary}" Grid.Column="0" Grid.Row="0">
+            <TextBlock Grid.Column="0" Grid.Row="0">
                 <Run Text="Total games: "/>
                 <Run Text="{Binding Games.Count, Mode=OneWay}"/>
             </TextBlock>
-            <TextBlock Grid.Column="2" Grid.Row="0"/>
-            <TextBlock Grid.Column="4" Grid.Row="0"/>
+            <TextBlock Text="Sort by:" Grid.Column="2" Grid.Row="0"/>
+            <TextBlock Text="Filter:" Grid.Column="5" Grid.Row="0"/>
             <Border
                 CornerRadius="5"
                 Background="{DynamicResource AppTitlebarBackground}"
@@ -258,8 +262,13 @@
                          FontSize="16"/>
                 
             </Border>
-            <ComboBox Grid.Column="2" Grid.Row="1"/>
-            <ComboBox Grid.Column="4" Grid.Row="1"/>
+			<TextBlock Text="" FontFamily="{StaticResource IconsDef}" FontSize="20" Grid.Column="3" Grid.Row="1"/> <!---->
+			<ComboBox Style="{StaticResource ComboBoxStyle1}" Grid.Column="2" Grid.Row="1">
+				<ComboBoxItem Content="A-Z"/>
+				<ComboBoxItem Content="Total Playtime"/>
+				<ComboBoxItem Content="Recently Played"/>
+			</ComboBox>
+			<ComboBox Style="{StaticResource ComboBoxStyle1}" Grid.Column="5" Grid.Row="1"/>
         </Grid>
     </Grid>
 </UserControl>

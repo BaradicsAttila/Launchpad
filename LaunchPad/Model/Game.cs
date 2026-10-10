@@ -113,8 +113,22 @@ namespace LaunchPad.Model
 		}
 		[JsonIgnore]
 		public bool? IsGame => DetermineIsGame(Source);
+		private ImageSource? _icon;
+		private bool _iconLoaded;
+
 		[JsonIgnore]
-		public ImageSource? Icon => ExtractIcon(Source);
+		public ImageSource? Icon
+		{
+			get
+			{
+				if (!_iconLoaded)
+				{
+					_icon = LaunchPad.Helpers.IconHelper.GetIcon(Source, 128);
+					_iconLoaded = true;
+				}
+				return _icon;
+			}
+		}
 		[JsonIgnore]
 		public Session? ActiveSession { get; private set; }
 		[JsonIgnore]
@@ -124,6 +138,7 @@ namespace LaunchPad.Model
 
 		partial void OnSourceChanged(string value)
 		{
+			_iconLoaded = false;
 			OnPropertyChanged(nameof(Icon));
 			OnPropertyChanged(nameof(IsGame));
 		}
