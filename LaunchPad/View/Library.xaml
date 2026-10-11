@@ -79,23 +79,6 @@
                                   HorizontalAlignment="Center" Margin="0" VerticalAlignment="Center"/>
                             </Border>
                         </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="true">
-                                <Setter TargetName="arrow" Property="Fill" Value="{StaticResource ComboBox.MouseOver.Glyph}"/>
-                                <Setter TargetName="templateRoot" Property="Background" Value="{StaticResource ComboBox.MouseOver.Background}"/>
-                                <Setter TargetName="templateRoot" Property="BorderBrush" Value="{StaticResource ComboBox.MouseOver.Border}"/>
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="true">
-                                <Setter TargetName="arrow" Property="Fill" Value="{StaticResource ComboBox.Pressed.Glyph}"/>
-                                <Setter TargetName="templateRoot" Property="Background" Value="{StaticResource ComboBox.Pressed.Background}"/>
-                                <Setter TargetName="templateRoot" Property="BorderBrush" Value="{StaticResource ComboBox.Pressed.Border}"/>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="false">
-                                <Setter TargetName="arrow" Property="Fill" Value="{StaticResource ComboBox.Disabled.Glyph}"/>
-                                <Setter TargetName="templateRoot" Property="Background" Value="{StaticResource ComboBox.Disabled.Background}"/>
-                                <Setter TargetName="templateRoot" Property="BorderBrush" Value="{StaticResource ComboBox.Disabled.Border}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -120,8 +103,8 @@
                     <Border x:Name="dropDownBorder"
                         MinWidth="{Binding ActualWidth, ElementName=templateRoot}"
                         MaxHeight="{TemplateBinding MaxDropDownHeight}"
-                        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                        BorderBrush="{DynamicResource {x:Static SystemColors.WindowFrameBrushKey}}"
+                        Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding Foreground}"
                         BorderThickness="1">
                         <ScrollViewer x:Name="DropDownScrollViewer">
                             <Grid x:Name="grid" RenderOptions.ClearTypeHint="Enabled">
@@ -193,40 +176,43 @@
             <Setter Property="Stylus.IsFlicksEnabled" Value="False"/>
             <Setter Property="Template" Value="{StaticResource ComboBoxTemplate}"/>
         </Style>
+		<Style x:Key="XButtonStyle" TargetType="Button">
+			<Setter Property="Content" Value=""/>
+			<Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+			<Setter Property="BorderThickness" Value="0"/>
+			<Setter Property="Width" Value="20"/>
+			<Setter Property="Height" Value="20"/>
+			<Setter Property="FontSize" Value="8"/>
+			<Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
+			<Setter Property="Background" Value="Transparent"/>
+			<Style.Triggers>
+				<Trigger Property="IsMouseOver" Value="True">
+					<Setter Property="Background" Value="Transparent"/>
+					<Setter Property="Template">
+						<Setter.Value>
+							<ControlTemplate TargetType="{x:Type Button}">
+								<Border Background="{TemplateBinding Background}">
+									<ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+								</Border>
+							</ControlTemplate>
+						</Setter.Value>
+					</Setter>
+				</Trigger>
+				<Trigger Property="IsMouseCaptured" Value="True">
+					<Setter Property="Foreground" Value="{DynamicResource AppMenuBackgroundPrimary}"/>
+				</Trigger>
+			</Style.Triggers>
+		</Style>
 
-    </UserControl.Resources>
+
+	</UserControl.Resources>
     <Grid>
-        
-		<!--<Button Content="★"
-        Command="{Binding DataContext.ToggleFavouriteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-        CommandParameter="{Binding}"/>
-        <MenuItem Header="Exclude this"
-          Command="{Binding DataContext.ExcludeGameCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-          CommandParameter="{Binding}"/>
-        <MenuItem Header="Change exe path..."
-          Command="{Binding DataContext.ChangeExePathCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-          CommandParameter="{Binding}"/>
-        <Button x:Name="ExcludeToggleButton"
-        Content="Exclude"
-        Command="{Binding DataContext.ExcludeGameCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-        CommandParameter="{Binding}">
-            <Button.Style>
-                <Style TargetType="Button">
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding IsExcluded}" Value="True">
-                            <Setter Property="Content" Value="Include"/>
-                            <Setter Property="Command" Value="{Binding DataContext.IncludeGameCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </Button.Style>
-        </Button>-->
         <Grid.RowDefinitions>
             <RowDefinition Height="50"/>
             <RowDefinition Height="50"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
-        <Grid Width="480" HorizontalAlignment="Right" Grid.Row="1">
+        <Grid Width="530" HorizontalAlignment="Right" Grid.Row="1">
             <Grid.RowDefinitions>
                 <RowDefinition Height="20"/>
                 <RowDefinition Height="30"/>
@@ -234,7 +220,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="250"/>
                 <ColumnDefinition Width="10"/>
-                <ColumnDefinition Width="100"/>
+                <ColumnDefinition Width="150"/>
                 <ColumnDefinition Width="20"/>
                 <ColumnDefinition Width="10"/>
                 <ColumnDefinition Width="50"/>
@@ -246,7 +232,7 @@
             </TextBlock>
             <TextBlock Text="Sort by:" Grid.Column="2" Grid.Row="0"/>
             <TextBlock Text="Filter:" Grid.Column="5" Grid.Row="0"/>
-            <Border
+			<Border				
                 CornerRadius="5"
                 Background="{DynamicResource AppTitlebarBackground}"
                 BorderBrush="{DynamicResource AppFontColorPrimary}"
@@ -254,17 +240,22 @@
                 Grid.Column="0" 
                 Grid.Row="1"
                 ClipToBounds="True">
-                <TextBox helpers:TextBoxHelper.Placeholder="Search..."
-                         Background="Transparent"
-                         VerticalContentAlignment="Center" 
-                         Foreground="{DynamicResource AppFontColorPrimary}" 
-                         BorderThickness="0" 
-                         FontSize="16"/>
-                
-            </Border>
+				<StackPanel Orientation="Horizontal">
+				<TextBox 
+                     helpers:TextBoxHelper.Placeholder="Search..."
+                     Foreground="{DynamicResource AppFontColorPrimary}" 
+                     Background="Transparent"
+                     VerticalContentAlignment="Center" 
+                     BorderThickness="0" 
+                     FontSize="16"
+                     Width="225"/>
+				<Button
+                    Style="{StaticResource XButtonStyle}"/>
+				</StackPanel>
+			</Border>
 			<TextBlock Text="" FontFamily="{StaticResource IconsDef}" FontSize="20" Grid.Column="3" Grid.Row="1"/> <!---->
-			<ComboBox Style="{StaticResource ComboBoxStyle1}" Grid.Column="2" Grid.Row="1">
-				<ComboBoxItem Content="A-Z"/>
+			<ComboBox Style="{StaticResource ComboBoxStyle1}" SelectedIndex="0" FontSize="16" Grid.Column="2" Grid.Row="1">
+				<ComboBoxItem Content="Alphabetical" />
 				<ComboBoxItem Content="Total Playtime"/>
 				<ComboBoxItem Content="Recently Played"/>
 			</ComboBox>
