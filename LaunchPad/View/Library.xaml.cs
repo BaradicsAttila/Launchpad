@@ -25,5 +25,10 @@ namespace LaunchPad.View
             InitializeComponent();
             DataContext = App.ServiceProvider.GetRequiredService<LibraryViewModel>();
         }
-    }
+
+		private void Button_Click(object sender, RoutedEventArgs e)
+		{
+			this.SearchBar.Text = string.Empty;
+		}
+	}
 }

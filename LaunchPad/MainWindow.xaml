@@ -18,7 +18,7 @@
 	<Window.DataContext>
 		<vm:MainPageVM/>
 	</Window.DataContext>
-    <Grid Background="{DynamicResource AppBackgroundSecondary}">
+    <Grid Background="{DynamicResource AppBackgroundSecondary}" Focusable="True" MouseDown="Grid_MouseDown">
 		<Grid.RowDefinitions>
 			<RowDefinition Height="45"/>
 			<RowDefinition/>

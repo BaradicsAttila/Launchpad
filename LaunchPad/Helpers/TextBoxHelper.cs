@@ -1,151 +1,180 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 
 namespace LaunchPad.Helpers
 {
-    public static class TextBoxHelper
-    {
-        public static string GetPlaceholder(DependencyObject obj) =>
-            (string)obj.GetValue(PlaceholderProperty);
+	public static class TextBoxHelper
+	{
+		public static string GetPlaceholder(DependencyObject obj) =>
+			(string)obj.GetValue(PlaceholderProperty);
 
-        public static void SetPlaceholder(DependencyObject obj, string value) =>
-            obj.SetValue(PlaceholderProperty, value);
+		public static void SetPlaceholder(DependencyObject obj, string value) =>
+			obj.SetValue(PlaceholderProperty, value);
 
-        public static readonly DependencyProperty PlaceholderProperty =
-            DependencyProperty.RegisterAttached(
-                "Placeholder",
-                typeof(string),
-                typeof(TextBoxHelper),
-                new FrameworkPropertyMetadata(
-                    defaultValue: null,
-                    propertyChangedCallback: OnPlaceholderChanged)
-                );
+		public static readonly DependencyProperty PlaceholderProperty =
+			DependencyProperty.RegisterAttached(
+				"Placeholder",
+				typeof(string),
+				typeof(TextBoxHelper),
+				new FrameworkPropertyMetadata(
+					defaultValue: null,
+					propertyChangedCallback: OnPlaceholderChanged)
+				);
 
-        private static void OnPlaceholderChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-        {
-            if (d is TextBox textBoxControl)
-            {
-                if (!textBoxControl.IsLoaded)
-                {
-                    // Ensure that the events are not added multiple times
-                    textBoxControl.Loaded -= TextBoxControl_Loaded;
-                    textBoxControl.Loaded += TextBoxControl_Loaded;
-                }
+		private static void OnPlaceholderChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+		{
+			if (d is TextBox textBoxControl)
+			{
+				if (!textBoxControl.IsLoaded)
+				{
+					// Ensure that the events are not added multiple times
+					textBoxControl.Loaded -= TextBoxControl_Loaded;
+					textBoxControl.Loaded += TextBoxControl_Loaded;
+				}
 
-                textBoxControl.TextChanged -= TextBoxControl_TextChanged;
-                textBoxControl.TextChanged += TextBoxControl_TextChanged;
+				// Először mindig leszedjük, hogy ne duplázódjon
+				textBoxControl.TextChanged -= TextBoxControl_TextChanged;
+				textBoxControl.GotKeyboardFocus -= TextBoxControl_GotKeyboardFocus;
+				textBoxControl.LostKeyboardFocus -= TextBoxControl_LostKeyboardFocus;
 
-                // If the adorner exists, invalidate it to draw the current text
-                if (GetOrCreateAdorner(textBoxControl, out PlaceholderAdorner adorner))
-                    adorner.InvalidateVisual();
-            }
-        }
+				textBoxControl.TextChanged += TextBoxControl_TextChanged;
+				textBoxControl.GotKeyboardFocus += TextBoxControl_GotKeyboardFocus;
+				textBoxControl.LostKeyboardFocus += TextBoxControl_LostKeyboardFocus;
 
-        private static void TextBoxControl_Loaded(object sender, RoutedEventArgs e)
-        {
-            if (sender is TextBox textBoxControl)
-            {
-                textBoxControl.Loaded -= TextBoxControl_Loaded;
-                GetOrCreateAdorner(textBoxControl, out _);
-            }
-        }
+				// If the adorner exists, invalidate it to draw the current text
+				if (GetOrCreateAdorner(textBoxControl, out PlaceholderAdorner adorner))
+				{
+					adorner.InvalidateVisual();
+					UpdateAdornerVisibility(textBoxControl, textBoxControl.IsKeyboardFocused);
+				}
+			}
+		}
 
-        private static void TextBoxControl_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (sender is TextBox textBoxControl
-                && GetOrCreateAdorner(textBoxControl, out PlaceholderAdorner adorner))
-            {
-                // Control has text. Hide the adorner.
-                if (textBoxControl.Text.Length > 0)
-                    adorner.Visibility = Visibility.Hidden;
+		private static void TextBoxControl_Loaded(object sender, RoutedEventArgs e)
+		{
+			if (sender is TextBox textBoxControl)
+			{
+				textBoxControl.Loaded -= TextBoxControl_Loaded;
+				UpdateAdornerVisibility(textBoxControl, textBoxControl.IsKeyboardFocused);
+			}
+		}
 
-                // Control has no text. Show the adorner.
-                else
-                    adorner.Visibility = Visibility.Visible;
-            }
-        }
+		private static void TextBoxControl_TextChanged(object sender, TextChangedEventArgs e)
+		{
+			if (sender is TextBox textBoxControl)
+				UpdateAdornerVisibility(textBoxControl, textBoxControl.IsKeyboardFocused);
+		}
 
-        private static bool GetOrCreateAdorner(TextBox textBoxControl, out PlaceholderAdorner adorner)
-        {
-            // Get the adorner layer
-            AdornerLayer layer = AdornerLayer.GetAdornerLayer(textBoxControl);
+		private static void TextBoxControl_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+		{
+			if (sender is TextBox textBoxControl)
+				UpdateAdornerVisibility(textBoxControl, hasFocus: true);
+		}
 
-            // If null, it doesn't exist or the control's template isn't loaded
-            if (layer == null)
-            {
-                adorner = null;
-                return false;
-            }
+		private static void TextBoxControl_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+		{
+			if (sender is TextBox textBoxControl)
+				UpdateAdornerVisibility(textBoxControl, hasFocus: false);
+		}
 
-            // Layer exists, try to find the adorner
-            adorner = layer.GetAdorners(textBoxControl)?.OfType<PlaceholderAdorner>().FirstOrDefault();
+		private static void UpdateAdornerVisibility(TextBox textBoxControl, bool hasFocus)
+		{
+			if (!GetOrCreateAdorner(textBoxControl, out PlaceholderAdorner adorner))
+				return;
 
-            // Adorner never added to control, so add it
-            if (adorner == null)
-            {
-                adorner = new PlaceholderAdorner(textBoxControl);
-                layer.Add(adorner);
-            }
+			// Csak akkor látszik, ha üres a mező ÉS nincs benne a fókusz
+			adorner.Visibility = (textBoxControl.Text.Length == 0 && !hasFocus)
+				? Visibility.Visible
+				: Visibility.Hidden;
+		}
 
-            return true;
-        }
+		private static bool GetOrCreateAdorner(TextBox textBoxControl, out PlaceholderAdorner adorner)
+		{
+			// Get the adorner layer
+			AdornerLayer layer = AdornerLayer.GetAdornerLayer(textBoxControl);
 
-        public class PlaceholderAdorner : Adorner
-        {
-            public PlaceholderAdorner(TextBox textBox) : base(textBox) { }
+			// If null, it doesn't exist or the control's template isn't loaded
+			if (layer == null)
+			{
+				adorner = null;
+				return false;
+			}
 
-            protected override void OnRender(DrawingContext drawingContext)
-            {
-                TextBox textBoxControl = (TextBox)AdornedElement;
+			// Layer exists, try to find the adorner
+			adorner = layer.GetAdorners(textBoxControl)?.OfType<PlaceholderAdorner>().FirstOrDefault();
 
-                string placeholderValue = TextBoxHelper.GetPlaceholder(textBoxControl);
+			// Adorner never added to control, so add it
+			if (adorner == null)
+			{
+				adorner = new PlaceholderAdorner(textBoxControl);
+				layer.Add(adorner);
+			}
 
-                if (string.IsNullOrEmpty(placeholderValue))
-                    return;
-                var placeholderBrush = ((Brush)Application.Current.Resources["AppFontColorPrimary"]).Clone();
-                placeholderBrush.Opacity = 0.7;
-                // Create the formatted text object
-                FormattedText text = new FormattedText(
-                                            placeholderValue,
-                                            System.Globalization.CultureInfo.CurrentCulture,
-                                            textBoxControl.FlowDirection,
-                                            new Typeface(textBoxControl.FontFamily,
-                                                         textBoxControl.FontStyle,
-                                                         textBoxControl.FontWeight,
-                                                         textBoxControl.FontStretch),
-                                            textBoxControl.FontSize,
-                                            
-                                            placeholderBrush,
-                                            VisualTreeHelper.GetDpi(textBoxControl).PixelsPerDip);
+			return true;
+		}
 
-                text.MaxTextWidth = System.Math.Max(textBoxControl.ActualWidth - textBoxControl.Padding.Left - textBoxControl.Padding.Right, 10);
-                text.MaxTextHeight = System.Math.Max(textBoxControl.ActualHeight, 10);
+		public class PlaceholderAdorner : Adorner
+		{
+			public PlaceholderAdorner(TextBox textBox) : base(textBox)
+			{
+				// Ne nyelje el a kattintást, hogy az a TextBox-ig eljusson
+				IsHitTestVisible = false;
+			}
 
-                // Render based on padding of the control, to try and match where the textbox places text
-                Point renderingOffset = new Point(textBoxControl.Padding.Left, textBoxControl.Padding.Top);
+			protected override void OnRender(DrawingContext drawingContext)
+			{
+				TextBox textBoxControl = (TextBox)AdornedElement;
 
-                // Template contains the content part; adjust sizes to try and align the text
-                if (textBoxControl.Template.FindName("PART_ContentHost", textBoxControl) is FrameworkElement part)
-                {
-                    Point partPosition = part.TransformToAncestor(textBoxControl).Transform(new Point(0, 0));
-                    renderingOffset.X += partPosition.X;
-                    renderingOffset.Y += partPosition.Y;
+				string placeholderValue = TextBoxHelper.GetPlaceholder(textBoxControl);
 
-                    text.MaxTextWidth = System.Math.Max(part.ActualWidth - renderingOffset.X, 10);
-                    text.MaxTextHeight = System.Math.Max(part.ActualHeight, 10);
-                    double verticalOffset = (part.ActualHeight - text.Height) / 2;
-                    renderingOffset.Y += System.Math.Max(verticalOffset, 0);
-                }
+				if (string.IsNullOrEmpty(placeholderValue))
+					return;
+				var placeholderBrush = ((Brush)Application.Current.Resources["AppFontColorPrimary"]).Clone();
+				placeholderBrush.Opacity = 0.7;
+				// Create the formatted text object
+				FormattedText text = new FormattedText(
+											placeholderValue,
+											System.Globalization.CultureInfo.CurrentCulture,
+											textBoxControl.FlowDirection,
+											new Typeface(textBoxControl.FontFamily,
+														 textBoxControl.FontStyle,
+														 textBoxControl.FontWeight,
+														 textBoxControl.FontStretch),
+											textBoxControl.FontSize,
 
-                // Draw the text
+											placeholderBrush,
+											VisualTreeHelper.GetDpi(textBoxControl).PixelsPerDip);
 
-                drawingContext.DrawText(text, renderingOffset);
-            }
-        }
-    }
+				text.MaxTextWidth = System.Math.Max(textBoxControl.ActualWidth - textBoxControl.Padding.Left - textBoxControl.Padding.Right, 10);
+				text.MaxTextHeight = System.Math.Max(textBoxControl.ActualHeight, 10);
+
+				// Render based on padding of the control, to try and match where the textbox places text
+				Point renderingOffset = new Point(textBoxControl.Padding.Left, textBoxControl.Padding.Top);
+
+				// Template contains the content part; adjust sizes to try and align the text
+				if (textBoxControl.Template.FindName("PART_ContentHost", textBoxControl) is FrameworkElement part)
+				{
+					Point partPosition = part.TransformToAncestor(textBoxControl).Transform(new Point(0, 0));
+					renderingOffset.X += partPosition.X;
+					renderingOffset.Y += partPosition.Y;
+
+					text.MaxTextWidth = System.Math.Max(part.ActualWidth - renderingOffset.X, 10);
+					text.MaxTextHeight = System.Math.Max(part.ActualHeight, 10);
+					double verticalOffset = (part.ActualHeight - text.Height) / 2;
+					renderingOffset.Y += System.Math.Max(verticalOffset, 0);
+				}
+
+				// Draw the text
+
+				drawingContext.DrawText(text, renderingOffset);
+			}
+		}
+	}
 }

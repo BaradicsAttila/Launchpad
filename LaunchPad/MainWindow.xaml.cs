@@ -13,5 +13,10 @@ namespace LaunchPad
 		{
 			InitializeComponent();
 		}
-	}
+
+		private void Grid_MouseDown(object sender, MouseButtonEventArgs e)
+		{
+			((UIElement)sender).Focus();
+		}
+    }
 }
