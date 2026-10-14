@@ -35,6 +35,22 @@ namespace LaunchPad.Model
 			: null;
 
 		[JsonIgnore]
+		public string Platform => DetectPlatform(Source);
+
+		private static string DetectPlatform(string? path)
+		{
+			if (string.IsNullOrEmpty(path)) return "Other";
+			var lower = path.ToLowerInvariant();
+
+			if (lower.Contains(@"\steamapps\")) return "Steam";
+			if (lower.Contains(@"\epic games\")) return "Epic";
+			if (lower.Contains(@"\ubisoft game launcher\")) return "Ubisoft";
+			if (lower.Contains(@"\ea games\") || lower.Contains(@"\origin games\")) return "EA";
+			if (lower.Contains(@"\gog galaxy\")) return "GOG"; 
+			if (lower.Contains("battle.net") || lower.Contains("blizzard")) return "Battle.net";
+			return "Other";
+		}
+		[JsonIgnore]
 		public string LastPlayedFormatted
 		{
 			get
@@ -141,6 +157,7 @@ namespace LaunchPad.Model
 			_iconLoaded = false;
 			OnPropertyChanged(nameof(Icon));
 			OnPropertyChanged(nameof(IsGame));
+			OnPropertyChanged(nameof(Platform));
 		}
 		public void StartSession()
 		{

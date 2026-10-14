@@ -32,6 +32,8 @@ namespace LaunchPad.Services
 			dict["AppFontFamily"] = new System.Windows.Media.FontFamily(settings.FontFamily);            
 			dict["AppFontColorPrimary"] = ToBrush(settings.FontColorPrimary);
 			dict["AppFontColorSecondary"] = ToBrush(settings.FontColorSecondary);
+			dict["AppBorderColorPrimary"] = ToBrush(settings.BorderColorPrimary);
+			dict["AppBorderColorSecondary"] = ToBrush(settings.BorderColorSecondary);
 			dict["AppMenuBackgroundPrimary"] = ToBrush(settings.MenuBackgroundPrimary);
 			dict["AppMenuBackgroundSecondary"] = ToBrush(settings.MenuBackgroundSecondary);
 			dict["AppBackgroundPrimary"] = ToBrush(settings.BackgroundPrimary);

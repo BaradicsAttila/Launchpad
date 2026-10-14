@@ -237,7 +237,113 @@
 				<ComboBoxItem Content="Total Playtime"/>
 				<ComboBoxItem Content="Recently Played"/>
 			</ComboBox>
-			<ComboBox Style="{StaticResource ComboBoxStyle1}" Grid.Column="5" Grid.Row="1"/>
-        </Grid>
+			<!--<ComboBox Style="{StaticResource ComboBoxStyle1}" Grid.Column="5" Grid.Row="1"/>-->
+			<StackPanel HorizontalAlignment="Left" Grid.Column="5" Grid.Row="1">
+
+				<!-- A gomb -->
+				<ToggleButton x:Name="FilterButton"
+              ToolTip="Filter">
+					<ToggleButton.Style>
+						<Style TargetType="ToggleButton">
+							<Setter Property="Width" Value="32"/>
+							<Setter Property="Height" Value="32"/>
+							<Setter Property="Padding" Value="0"/>
+							<Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
+							<Setter Property="Background" Value="{DynamicResource AppBackgroundSecondary}"/>
+							<Setter Property="BorderBrush" Value="{DynamicResource AppFontColorSecondary}"/>
+							<Setter Property="BorderThickness" Value="1"/>
+							<Setter Property="Cursor" Value="Hand"/>
+
+							<Setter Property="Template">
+								<Setter.Value>
+									<ControlTemplate TargetType="ToggleButton">
+										<Border x:Name="Bd"
+                                                Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}">
+											<ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+										</Border>
+										<ControlTemplate.Triggers>
+											<Trigger Property="IsMouseOver" Value="True">
+												<Setter TargetName="Bd" Property="Background"
+                                                        Value="{DynamicResource AppSelectedMenuItemBackground}"/>
+											</Trigger>
+											<Trigger Property="IsChecked" Value="True">
+												<Setter TargetName="Bd" Property="Background"
+                                                        Value="{DynamicResource AppSelectedMenuItemBackground}"/>
+											</Trigger>
+										</ControlTemplate.Triggers>
+									</ControlTemplate>
+								</Setter.Value>
+							</Setter>
+
+							<Style.Triggers>
+								<DataTrigger Binding="{Binding IsOpen, ElementName=FilterPopup}" Value="True">
+									<Setter Property="IsHitTestVisible" Value="False"/>
+								</DataTrigger>
+							</Style.Triggers>
+						</Style>
+					</ToggleButton.Style>
+
+					<!-- A három vonal -->
+					<Path Data="M0,1 H16 M0,7 H16 M0,13 H16"
+                          Width="16" Height="14"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                          StrokeThickness="2"/>
+				</ToggleButton>
+				<!-- A lenyíló panel -->
+				<Popup x:Name="FilterPopup"
+                       PlacementTarget="{Binding ElementName=FilterButton}"
+                       Placement="Bottom"
+                       StaysOpen="False"
+                       AllowsTransparency="True"
+                       IsOpen="{Binding IsChecked, ElementName=FilterButton, Mode=TwoWay}">
+
+					<Border Background="{DynamicResource AppBackgroundSecondary}"
+                            BorderBrush="{DynamicResource AppFontColorSecondary}"
+                            BorderThickness="1"
+                            Padding="10"
+                            MinWidth="170">
+						<StackPanel>
+
+							<CheckBox Content="Show deleted"
+                                      IsChecked="{Binding ShowDeleted}"
+                                      Foreground="{DynamicResource AppFontColorPrimary}"
+                                      Margin="0,3"/>
+
+							<CheckBox Content="Show favourites"
+                                      IsChecked="{Binding ShowFavourites}"
+                                      Foreground="{DynamicResource AppFontColorPrimary}"
+                                      Margin="0,3"/>
+
+							<CheckBox Content="Show excluded"
+                                      IsChecked="{Binding ShowExcluded}"
+                                      Foreground="{DynamicResource AppFontColorPrimary}"
+                                      Margin="0,3"/>
+
+							<!-- Második szint: kattintásra lenyílik a platformok listája -->
+							<Expander Header="Source"
+                                      Foreground="{DynamicResource AppFontColorPrimary}"
+                                      Margin="0,3">
+								<ItemsControl ItemsSource="{Binding Sources}"
+                                              Margin="15,3,0,0">
+									<ItemsControl.ItemTemplate>
+										<DataTemplate>
+											<CheckBox Content="{Binding Name}"
+                                                      IsChecked="{Binding IsChecked}"
+                                                      Foreground="{DynamicResource AppFontColorPrimary}"
+                                                      Margin="0,2"/>
+										</DataTemplate>
+									</ItemsControl.ItemTemplate>
+								</ItemsControl>
+							</Expander>
+
+						</StackPanel>
+					</Border>
+				</Popup>
+
+			</StackPanel>
+		</Grid>
     </Grid>
 </UserControl>

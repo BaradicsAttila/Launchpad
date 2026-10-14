@@ -79,7 +79,7 @@
 			</StackPanel>
 		</ScrollViewer>
 
-        <Border Grid.Row="1" Background="{DynamicResource AppMenuBackgroundSecondary}" Margin="10 10 10 10" CornerRadius="10" BorderThickness="1" BorderBrush="#222222">
+		<Border Grid.Row="1" Background="{DynamicResource AppMenuBackgroundSecondary}" Margin="10 10 10 10" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource AppBorderColorSecondary}">
 			<Grid>
 				<Grid.RowDefinitions>
 					<RowDefinition Height="auto"/>
@@ -128,7 +128,7 @@
 				</ScrollViewer>
 			</Grid>
 		</Border>
-        <Border Grid.Row="2" VerticalAlignment="Bottom"  Background="{DynamicResource AppMenuBackgroundSecondary}" Margin="10 10 10 10" CornerRadius="10" BorderThickness="1" BorderBrush="#222222">
+		<Border Grid.Row="2" VerticalAlignment="Bottom"  Background="{DynamicResource AppMenuBackgroundSecondary}" Margin="10 10 10 10" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource AppBorderColorSecondary}">
 			<Grid>
 				<Grid.RowDefinitions>
 					<RowDefinition Height="40"/>

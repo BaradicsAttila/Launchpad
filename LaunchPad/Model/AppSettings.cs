@@ -9,6 +9,8 @@ namespace LaunchPad.Model
 		public string FontFamily { get; set; } = "Segoe UI";
 		public string FontColorPrimary { get; set; } = "#CCCCCC";
 		public string FontColorSecondary { get; set; } = "#8A6BE2";
+		public string BorderColorPrimary { get; set; } = "#5A3BB2";
+		public string BorderColorSecondary { get; set; } = "#222222";
 		public string MenuBackgroundPrimary { get; set; } = "#111119";
 		public string MenuBackgroundSecondary { get; set; } = "#15151C";
 		public string BackgroundPrimary { get; set; } = "#1F1F1F";
