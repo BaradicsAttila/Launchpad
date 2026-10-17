@@ -12,29 +12,35 @@ namespace LaunchPad.ViewModel
 
 	public partial class LibraryViewModel : ObservableObject
 	{
+		private const string EveryGameName = "Every game";
+		private const string FavouritesName = "Favourites";
+		private const string DeletedName = "Deleted";
+		private const string ExcludedName = "Excluded";
+
 		private readonly GameService _gameService;
 
 		public ObservableCollection<Game> Games { get; }
-		public ObservableCollection<FilterOption> Sources { get; } = new();
 
-		[ObservableProperty] private bool showDeleted;
-		[ObservableProperty] private bool showFavourites;
-		[ObservableProperty] private bool showExcluded;
+		// SHOW csoport: Every game / Favourites / Deleted / Excluded
+		public FilterGroup ShowFilter { get; }
 
-		partial void OnShowDeletedChanged(bool value) => RefreshGames();
-		partial void OnShowFavouritesChanged(bool value) => RefreshGames();
-		partial void OnShowExcludedChanged(bool value) => RefreshGames();
+		// SOURCE csoport: Steam / Epic / ...
+		public FilterGroup SourceFilter { get; }
 
 		public LibraryViewModel(GameService gameService)
 		{
-			_gameService = gameService;   // <-- javítva
+			_gameService = gameService;
 
-			foreach (var name in new[] { "Steam", "Epic", "Ubisoft", "EA", "GOG", "Battle.net", "Other" })
-			{
-				var option = new FilterOption(name);
-				option.PropertyChanged += (_, _) => RefreshGames();
-				Sources.Add(option);
-			}
+			// Alapból csak az "Every game" chip van kijelölve
+			ShowFilter = new FilterGroup(
+				new[] { EveryGameName, FavouritesName, DeletedName, ExcludedName },
+				initiallySelected: new[] { EveryGameName });
+
+			SourceFilter = new FilterGroup(
+				new[] { "Steam", "Epic", "Ubisoft", "EA", "GOG", "Battle.net", "Other" });
+
+			ShowFilter.Changed += (_, _) => RefreshGames();
+			SourceFilter.Changed += (_, _) => RefreshGames();
 
 			Games = new ObservableCollection<Game>(_gameService.Games.Where(IsVisible));
 
@@ -46,11 +52,22 @@ namespace LaunchPad.ViewModel
 
 		private bool IsVisible(Game game)
 		{
-			if (game.IsDeleted && !ShowDeleted) return false;
-			if (game.IsExcluded && !ShowExcluded) return false;
-			if (ShowFavourites && !game.IsFavourite) return false;
+			// 1) Állapot szerinti szűrés.
+			//    Ha egy chip sincs kijelölve (All), nincs szűrés: minden látszik.
+			//    Különben a kijelölt kategóriák UNIÓJA látszik.
+			bool isRegular = !game.IsDeleted && !game.IsExcluded;
 
-			var selected = Sources.Where(s => s.IsChecked).Select(s => s.Name).ToList();
+			bool matchesState =
+				!ShowFilter.HasSelection ||
+				(isRegular && ShowFilter.IsSelected(EveryGameName)) ||
+				(isRegular && game.IsFavourite && ShowFilter.IsSelected(FavouritesName)) ||
+				(game.IsDeleted && ShowFilter.IsSelected(DeletedName)) ||
+				(game.IsExcluded && ShowFilter.IsSelected(ExcludedName));
+
+			if (!matchesState) return false;
+
+			// 2) Source szűrés: ha egy sincs bejelölve, nincs szűrés
+			var selected = SourceFilter.SelectedNames;
 			if (selected.Count > 0 && !selected.Contains(game.Platform)) return false;
 
 			return true;

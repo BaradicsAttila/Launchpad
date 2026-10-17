@@ -7,94 +7,94 @@
              xmlns:helpers="clr-namespace:LaunchPad.Helpers"
              mc:Ignorable="d" 
              d:DesignHeight="450" d:DesignWidth="800">
-    <UserControl.Resources>
+	<UserControl.Resources>
 		<Style TargetType="TextBlock">
 			<Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
 		</Style>
-        <!-- Tab-os fókusz pontozott kerete -->
-        <Style x:Key="FocusVisual">
-            <Setter Property="Control.Template">
-                <Setter.Value>
-                    <ControlTemplate>
-                        <Rectangle Margin="2" StrokeDashArray="1 2"
+		<!-- Tab-os fókusz pontozott kerete -->
+		<Style x:Key="FocusVisual">
+			<Setter Property="Control.Template">
+				<Setter.Value>
+					<ControlTemplate>
+						<Rectangle Margin="2" StrokeDashArray="1 2"
                                Stroke="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"
                                SnapsToDevicePixels="true" StrokeThickness="1"/>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
 
-        <!-- A zárt doboz teste + nyíl -->
-        <Style x:Key="ComboBoxToggleButton" TargetType="{x:Type ToggleButton}">
-            <Setter Property="OverridesDefaultStyle" Value="true"/>
-            <Setter Property="IsTabStop" Value="false"/>
-            <Setter Property="Focusable" Value="false"/>
-            <Setter Property="ClickMode" Value="Press"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type ToggleButton}">
-                        <Border x:Name="templateRoot"
+		<!-- A zárt doboz teste + nyíl -->
+		<Style x:Key="ComboBoxToggleButton" TargetType="{x:Type ToggleButton}">
+			<Setter Property="OverridesDefaultStyle" Value="true"/>
+			<Setter Property="IsTabStop" Value="false"/>
+			<Setter Property="Focusable" Value="false"/>
+			<Setter Property="ClickMode" Value="Press"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="{x:Type ToggleButton}">
+						<Border x:Name="templateRoot"
                             CornerRadius="5"
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             SnapsToDevicePixels="true">
-                            <Border x:Name="splitBorder"
+							<Border x:Name="splitBorder"
                                 BorderBrush="Transparent" BorderThickness="1"
                                 HorizontalAlignment="Right" Margin="0"
                                 SnapsToDevicePixels="true"
                                 Width="{DynamicResource {x:Static SystemParameters.VerticalScrollBarWidthKey}}">
-                                <Path x:Name="arrow"
+								<Path x:Name="arrow"
                                   Data="F1 M 0,0 L 2.667,2.66665 L 5.3334,0 L 5.3334,-1.78168 L 2.6667,0.88501 L0,-1.78168 L0,0 Z"
                                   Fill="{TemplateBinding Foreground}"
                                   HorizontalAlignment="Center" Margin="0" VerticalAlignment="Center"/>
-                            </Border>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+							</Border>
+						</Border>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
 
-        <!-- A ComboBox felépítése -->
-        <ControlTemplate x:Key="ComboBoxTemplate" TargetType="{x:Type ComboBox}">
-            <Grid x:Name="templateRoot" SnapsToDevicePixels="true">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition MinWidth="{DynamicResource {x:Static SystemParameters.VerticalScrollBarWidthKey}}" Width="0"/>
-                </Grid.ColumnDefinitions>
+		<!-- A ComboBox felépítése -->
+		<ControlTemplate x:Key="ComboBoxTemplate" TargetType="{x:Type ComboBox}">
+			<Grid x:Name="templateRoot" SnapsToDevicePixels="true">
+				<Grid.ColumnDefinitions>
+					<ColumnDefinition Width="*"/>
+					<ColumnDefinition MinWidth="{DynamicResource {x:Static SystemParameters.VerticalScrollBarWidthKey}}" Width="0"/>
+				</Grid.ColumnDefinitions>
 
-                <!-- A lenyíló lista -->
-                <Popup x:Name="PART_Popup"
+				<!-- A lenyíló lista -->
+				<Popup x:Name="PART_Popup"
                    AllowsTransparency="true"
                    Grid.ColumnSpan="2"
                    IsOpen="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource Mode=TemplatedParent}}"
                    Margin="1"
                    Placement="Bottom"
                    PopupAnimation="{DynamicResource {x:Static SystemParameters.ComboBoxPopupAnimationKey}}">
-                    <Border x:Name="dropDownBorder"
+					<Border x:Name="dropDownBorder"
                         MinWidth="{Binding ActualWidth, ElementName=templateRoot}"
                         MaxHeight="{TemplateBinding MaxDropDownHeight}"
                         Background="{DynamicResource AppMenuBackgroundSecondary}"
                         BorderBrush="{TemplateBinding BorderBrush}"
                         BorderThickness="1">
-                        <ScrollViewer x:Name="DropDownScrollViewer">
-                            <Grid x:Name="grid" RenderOptions.ClearTypeHint="Enabled">
-                                <Canvas x:Name="canvas" HorizontalAlignment="Left" Height="0" VerticalAlignment="Top" Width="0">
-                                    <Rectangle x:Name="opaqueRect"
+						<ScrollViewer x:Name="DropDownScrollViewer">
+							<Grid x:Name="grid" RenderOptions.ClearTypeHint="Enabled">
+								<Canvas x:Name="canvas" HorizontalAlignment="Left" Height="0" VerticalAlignment="Top" Width="0">
+									<Rectangle x:Name="opaqueRect"
                                            Fill="{Binding Background, ElementName=dropDownBorder}"
                                            Height="{Binding ActualHeight, ElementName=dropDownBorder}"
                                            Width="{Binding ActualWidth, ElementName=dropDownBorder}"/>
-                                </Canvas>
-                                <ItemsPresenter x:Name="ItemsPresenter"
+								</Canvas>
+								<ItemsPresenter x:Name="ItemsPresenter"
                                             KeyboardNavigation.DirectionalNavigation="Contained"
                                             SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
-                            </Grid>
-                        </ScrollViewer>
-                    </Border>
-                </Popup>
+							</Grid>
+						</ScrollViewer>
+					</Border>
+				</Popup>
 
-                <!-- A doboz teste (nyitás/zárás) -->
-                <ToggleButton x:Name="toggleButton"
+				<!-- A doboz teste (nyitás/zárás) -->
+				<ToggleButton x:Name="toggleButton"
                           Background="{TemplateBinding Background}"
                           BorderBrush="{TemplateBinding BorderBrush}"
                           BorderThickness="{TemplateBinding BorderThickness}"
@@ -102,8 +102,8 @@
                           IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource Mode=TemplatedParent}}"
                           Style="{StaticResource ComboBoxToggleButton}"/>
 
-                <!-- A kiválasztott elem szövege -->
-                <ContentPresenter x:Name="contentPresenter"
+				<!-- A kiválasztott elem szövege -->
+				<ContentPresenter x:Name="contentPresenter"
                               ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
                               ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
                               Content="{TemplateBinding SelectionBoxItem}"
@@ -113,42 +113,150 @@
                               Margin="{TemplateBinding Padding}"
                               SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"
                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
-            </Grid>
-            <ControlTemplate.Triggers>
-                <Trigger Property="HasItems" Value="false">
-                    <Setter TargetName="dropDownBorder" Property="Height" Value="95"/>
-                </Trigger>
-                <MultiTrigger>
-                    <MultiTrigger.Conditions>
-                        <Condition Property="IsGrouping" Value="true"/>
-                        <Condition Property="VirtualizingPanel.IsVirtualizingWhenGrouping" Value="false"/>
-                    </MultiTrigger.Conditions>
-                    <Setter Property="ScrollViewer.CanContentScroll" Value="false"/>
-                </MultiTrigger>
-                <Trigger SourceName="DropDownScrollViewer" Property="ScrollViewer.CanContentScroll" Value="false">
-                    <Setter TargetName="opaqueRect" Property="Canvas.Top" Value="{Binding VerticalOffset, ElementName=DropDownScrollViewer}"/>
-                    <Setter TargetName="opaqueRect" Property="Canvas.Left" Value="{Binding HorizontalOffset, ElementName=DropDownScrollViewer}"/>
-                </Trigger>
-            </ControlTemplate.Triggers>
-        </ControlTemplate>
+			</Grid>
+			<ControlTemplate.Triggers>
+				<Trigger Property="HasItems" Value="false">
+					<Setter TargetName="dropDownBorder" Property="Height" Value="95"/>
+				</Trigger>
+				<MultiTrigger>
+					<MultiTrigger.Conditions>
+						<Condition Property="IsGrouping" Value="true"/>
+						<Condition Property="VirtualizingPanel.IsVirtualizingWhenGrouping" Value="false"/>
+					</MultiTrigger.Conditions>
+					<Setter Property="ScrollViewer.CanContentScroll" Value="false"/>
+				</MultiTrigger>
+				<Trigger SourceName="DropDownScrollViewer" Property="ScrollViewer.CanContentScroll" Value="false">
+					<Setter TargetName="opaqueRect" Property="Canvas.Top" Value="{Binding VerticalOffset, ElementName=DropDownScrollViewer}"/>
+					<Setter TargetName="opaqueRect" Property="Canvas.Left" Value="{Binding HorizontalOffset, ElementName=DropDownScrollViewer}"/>
+				</Trigger>
+			</ControlTemplate.Triggers>
+		</ControlTemplate>
 
-        <!-- Alapértékek, ezt adod a ComboBoxnak -->
-        <Style x:Key="ComboBoxStyle1" TargetType="{x:Type ComboBox}">
-            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}"/>
+		<!-- Alapértékek, ezt adod a ComboBoxnak -->
+		<Style x:Key="ComboBoxStyle1" TargetType="{x:Type ComboBox}">
+			<Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}"/>
 			<Setter Property="Background" Value="{DynamicResource AppTitlebarBackground}"/>
 			<Setter Property="BorderBrush" Value="{DynamicResource AppFontColorSecondary}"/>
 			<Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto"/>
-            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
-            <Setter Property="Padding" Value="6,3,5,3"/>
-            <Setter Property="ScrollViewer.CanContentScroll" Value="true"/>
-            <Setter Property="ScrollViewer.PanningMode" Value="Both"/>
-            <Setter Property="Stylus.IsFlicksEnabled" Value="False"/>
-            <Setter Property="Template" Value="{StaticResource ComboBoxTemplate}"/>
-        </Style>
+			<Setter Property="BorderThickness" Value="1"/>
+			<Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto"/>
+			<Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
+			<Setter Property="Padding" Value="6,3,5,3"/>
+			<Setter Property="ScrollViewer.CanContentScroll" Value="true"/>
+			<Setter Property="ScrollViewer.PanningMode" Value="Both"/>
+			<Setter Property="Stylus.IsFlicksEnabled" Value="False"/>
+			<Setter Property="Template" Value="{StaticResource ComboBoxTemplate}"/>
+		</Style>
+
+		<!-- Kapcsoló stílusú CheckBox (az "All" kapcsolókhoz) -->
+		<Style x:Key="SwitchCheckBoxStyle" TargetType="CheckBox">
+			<Setter Property="OverridesDefaultStyle" Value="True"/>
+			<Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+			<Setter Property="Cursor" Value="Hand"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="CheckBox">
+						<Grid Background="Transparent" Height="30">
+							<Grid.ColumnDefinitions>
+								<ColumnDefinition Width="*"/>
+								<ColumnDefinition Width="Auto"/>
+							</Grid.ColumnDefinitions>
+
+							<TextBlock Text="{TemplateBinding Content}"
+									   Foreground="{DynamicResource AppFontColorPrimary}"
+									   FontSize="13"
+									   VerticalAlignment="Center"/>
+
+							<Border x:Name="Track"
+									Grid.Column="1"
+									Width="34" Height="18"
+									CornerRadius="9"
+									Background="{DynamicResource AppBackgroundPrimary}"
+									BorderBrush="{DynamicResource AppTitlebarBackground}"
+									BorderThickness="1">
+								<Ellipse x:Name="Thumb"
+										 Width="12" Height="12"
+										 Margin="3,0,0,0"
+										 HorizontalAlignment="Left"
+										 Fill="{DynamicResource AppFontColorPrimary}">
+									<Ellipse.RenderTransform>
+										<TranslateTransform x:Name="ThumbTransform" X="0"/>
+									</Ellipse.RenderTransform>
+								</Ellipse>
+							</Border>
+						</Grid>
+
+						<ControlTemplate.Triggers>
+							<Trigger Property="IsMouseOver" Value="True">
+								<Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AppFontColorSecondary}"/>
+							</Trigger>
+							<Trigger Property="IsChecked" Value="True">
+								<Setter TargetName="Track" Property="Background" Value="{DynamicResource AppFontColorSecondary}"/>
+								<Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AppFontColorSecondary}"/>
+								<Setter TargetName="Thumb" Property="Fill" Value="White"/>
+								<Trigger.EnterActions>
+									<BeginStoryboard>
+										<Storyboard>
+											<DoubleAnimation Storyboard.TargetName="ThumbTransform"
+															 Storyboard.TargetProperty="X"
+															 To="14" Duration="0:0:0.15"/>
+										</Storyboard>
+									</BeginStoryboard>
+								</Trigger.EnterActions>
+								<Trigger.ExitActions>
+									<BeginStoryboard>
+										<Storyboard>
+											<DoubleAnimation Storyboard.TargetName="ThumbTransform"
+															 Storyboard.TargetProperty="X"
+															 To="0" Duration="0:0:0.15"/>
+										</Storyboard>
+									</BeginStoryboard>
+								</Trigger.ExitActions>
+							</Trigger>
+						</ControlTemplate.Triggers>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+
+		<!-- Chip (pill) stílusú CheckBox -->
+		<Style x:Key="ChipCheckBoxStyle" TargetType="CheckBox">
+			<Setter Property="OverridesDefaultStyle" Value="True"/>
+			<Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+			<Setter Property="Cursor" Value="Hand"/>
+			<Setter Property="Margin" Value="0,0,6,6"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="CheckBox">
+						<Border x:Name="Chip"
+								CornerRadius="12"
+								Padding="11,4"
+								Background="{DynamicResource AppBackgroundPrimary}"
+								BorderBrush="{DynamicResource AppTitlebarBackground}"
+								BorderThickness="1">
+							<TextBlock x:Name="Label"
+									   Text="{TemplateBinding Content}"
+									   FontSize="12"
+									   Foreground="{DynamicResource AppFontColorPrimary}"/>
+						</Border>
+						<ControlTemplate.Triggers>
+							<Trigger Property="IsMouseOver" Value="True">
+								<Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource AppFontColorSecondary}"/>
+							</Trigger>
+							<Trigger Property="IsChecked" Value="True">
+								<Setter TargetName="Chip" Property="Background" Value="{DynamicResource AppSelectedMenuItemBackground}"/>
+								<Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource AppFontColorSecondary}"/>
+								<Setter TargetName="Label" Property="Foreground" Value="{DynamicResource AppFontColorSecondary}"/>
+							</Trigger>
+						</ControlTemplate.Triggers>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+
 		<Style x:Key="XButtonStyle" TargetType="Button">
-			<Setter Property="Content" Value=""/>
+			<!-- Segoe MDL2 Assets / Fluent Icons: E711 = Cancel (X) -->
+			<Setter Property="Content" Value="&#xE711;"/>
 			<Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
 			<Setter Property="BorderThickness" Value="0"/>
 			<Setter Property="Width" Value="20"/>
@@ -176,37 +284,37 @@
 		</Style>
 		<DataTemplate x:Key="GameCardTemplate">
 			<Border>
-                
-            </Border>
-        </DataTemplate>
+
+			</Border>
+		</DataTemplate>
 
 	</UserControl.Resources>
-    <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="30"/>
-            <RowDefinition Height="50"/>
-            <RowDefinition Height="*"/>
-        </Grid.RowDefinitions>
-        <Grid Width="530" HorizontalAlignment="Right" Grid.Row="1">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="20"/>
-                <RowDefinition Height="30"/>
-            </Grid.RowDefinitions>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="250"/>
-                <ColumnDefinition Width="10"/>
-                <ColumnDefinition Width="150"/>
-                <ColumnDefinition Width="20"/>
-                <ColumnDefinition Width="10"/>
-                <ColumnDefinition Width="50"/>
-                <ColumnDefinition Width="30"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Grid.Row="0">
+	<Grid>
+		<Grid.RowDefinitions>
+			<RowDefinition Height="30"/>
+			<RowDefinition Height="50"/>
+			<RowDefinition Height="*"/>
+		</Grid.RowDefinitions>
+		<Grid Width="530" HorizontalAlignment="Right" Grid.Row="1">
+			<Grid.RowDefinitions>
+				<RowDefinition Height="20"/>
+				<RowDefinition Height="30"/>
+			</Grid.RowDefinitions>
+			<Grid.ColumnDefinitions>
+				<ColumnDefinition Width="250"/>
+				<ColumnDefinition Width="10"/>
+				<ColumnDefinition Width="150"/>
+				<ColumnDefinition Width="20"/>
+				<ColumnDefinition Width="10"/>
+				<ColumnDefinition Width="50"/>
+				<ColumnDefinition Width="30"/>
+			</Grid.ColumnDefinitions>
+			<TextBlock Grid.Column="0" Grid.Row="0">
                 <Run Text="Total games: "/>
                 <Run Text="{Binding Games.Count, Mode=OneWay}"/>
-            </TextBlock>
-            <TextBlock Text="Sort by:" Grid.Column="2" Grid.Row="0"/>
-            <TextBlock Text="Display:" Grid.Column="5" Grid.Row="0"/>
+			</TextBlock>
+			<TextBlock Text="Sort by:" Grid.Column="2" Grid.Row="0"/>
+			<TextBlock Text="Display:" Grid.Column="5" Grid.Row="0"/>
 			<Border				
                 CornerRadius="5"
                 Background="{DynamicResource AppTitlebarBackground}"
@@ -226,12 +334,13 @@
                          BorderThickness="0" 
                          FontSize="16"
                          Width="225"/>
-				    <Button
+					<Button
                         Style="{StaticResource XButtonStyle}"
                         Click="Button_Click"/>
 				</StackPanel>
 			</Border>
-			<TextBlock Text="" FontFamily="{StaticResource IconsDef}" FontSize="20" Grid.Column="3" Grid.Row="1"/> <!---->
+			<!-- FIGYELEM: ide told vissza az eredeti ikon karaktered (IconsDef font) -->
+			<TextBlock Text="&#xE8CB;" FontFamily="{StaticResource IconsDef}" FontSize="20" Grid.Column="3" Grid.Row="1"/>
 			<ComboBox Style="{StaticResource ComboBoxStyle1}" SelectedIndex="0" FontSize="16" Grid.Column="2" Grid.Row="1">
 				<ComboBoxItem Content="Alphabetical" />
 				<ComboBoxItem Content="Total Playtime"/>
@@ -240,38 +349,50 @@
 			<!--<ComboBox Style="{StaticResource ComboBoxStyle1}" Grid.Column="5" Grid.Row="1"/>-->
 			<StackPanel HorizontalAlignment="Left" Grid.Column="5" Grid.Row="1">
 
-				<!-- A gomb -->
-				<ToggleButton x:Name="FilterButton"
-              ToolTip="Filter">
+				<!-- A szűrő gomb -->
+				<ToggleButton x:Name="FilterButton" ToolTip="Filter">
 					<ToggleButton.Style>
 						<Style TargetType="ToggleButton">
-							<Setter Property="Width" Value="32"/>
-							<Setter Property="Height" Value="32"/>
-							<Setter Property="Padding" Value="0"/>
-							<Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
-							<Setter Property="Background" Value="{DynamicResource AppBackgroundSecondary}"/>
-							<Setter Property="BorderBrush" Value="{DynamicResource AppFontColorSecondary}"/>
-							<Setter Property="BorderThickness" Value="1"/>
+							<Setter Property="OverridesDefaultStyle" Value="True"/>
+							<Setter Property="Width" Value="30"/>
+							<Setter Property="Height" Value="30"/>
 							<Setter Property="Cursor" Value="Hand"/>
-
+							<Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
 							<Setter Property="Template">
 								<Setter.Value>
 									<ControlTemplate TargetType="ToggleButton">
-										<Border x:Name="Bd"
-                                                Background="{TemplateBinding Background}"
-                                                BorderBrush="{TemplateBinding BorderBrush}"
-                                                BorderThickness="{TemplateBinding BorderThickness}">
-											<ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"/>
-										</Border>
+										<Grid>
+											<!-- Alap: ugyanaz, mint a keresősáv / ComboBox -->
+											<Border x:Name="Bd"
+													CornerRadius="5"
+													Background="{DynamicResource AppTitlebarBackground}"
+													BorderBrush="{DynamicResource AppFontColorSecondary}"
+													BorderThickness="1"/>
+
+											<!-- Hover / checked réteg -->
+											<Border x:Name="Overlay"
+													CornerRadius="5"
+													Background="{DynamicResource AppSelectedMenuItemBackground}"
+													Opacity="0"/>
+
+											<!-- Tölcsér ikon -->
+											<Path x:Name="Icon"
+												  Data="M1,2 H15 L10,8.5 V14 L6,12 V8.5 Z"
+												  Stroke="{TemplateBinding Foreground}"
+												  StrokeThickness="1.5"
+												  StrokeLineJoin="Round"
+												  Width="16" Height="16"
+												  Stretch="None"
+												  HorizontalAlignment="Center"
+												  VerticalAlignment="Center"/>
+										</Grid>
 										<ControlTemplate.Triggers>
 											<Trigger Property="IsMouseOver" Value="True">
-												<Setter TargetName="Bd" Property="Background"
-                                                        Value="{DynamicResource AppSelectedMenuItemBackground}"/>
+												<Setter TargetName="Overlay" Property="Opacity" Value="0.6"/>
 											</Trigger>
 											<Trigger Property="IsChecked" Value="True">
-												<Setter TargetName="Bd" Property="Background"
-                                                        Value="{DynamicResource AppSelectedMenuItemBackground}"/>
+												<Setter TargetName="Overlay" Property="Opacity" Value="1"/>
+												<Setter TargetName="Icon" Property="Stroke" Value="{DynamicResource AppFontColorSecondary}"/>
 											</Trigger>
 										</ControlTemplate.Triggers>
 									</ControlTemplate>
@@ -285,59 +406,89 @@
 							</Style.Triggers>
 						</Style>
 					</ToggleButton.Style>
-
-					<!-- A három vonal -->
-					<Path Data="M0,1 H16 M0,7 H16 M0,13 H16"
-                          Width="16" Height="14"
-                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
-                          StrokeThickness="2"/>
 				</ToggleButton>
+
 				<!-- A lenyíló panel -->
 				<Popup x:Name="FilterPopup"
-                       PlacementTarget="{Binding ElementName=FilterButton}"
-                       Placement="Bottom"
-                       StaysOpen="False"
-                       AllowsTransparency="True"
-                       IsOpen="{Binding IsChecked, ElementName=FilterButton, Mode=TwoWay}">
+					   PlacementTarget="{Binding ElementName=FilterButton}"
+					   Placement="Bottom"
+					   HorizontalOffset="-208"
+					   VerticalOffset="-4"
+					   StaysOpen="False"
+					   AllowsTransparency="True"
+					   PopupAnimation="Fade"
+					   IsOpen="{Binding IsChecked, ElementName=FilterButton, Mode=TwoWay}">
 
-					<Border Background="{DynamicResource AppBackgroundSecondary}"
-                            BorderBrush="{DynamicResource AppFontColorSecondary}"
-                            BorderThickness="1"
-                            Padding="10"
-                            MinWidth="170">
+					<Border Margin="8"
+							Width="230"
+							CornerRadius="8"
+							Background="{DynamicResource AppMenuBackgroundSecondary}"
+							BorderBrush="{DynamicResource AppFontColorSecondary}"
+							BorderThickness="1"
+							Padding="14,12">
+						<Border.Effect>
+							<DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.5" Color="Black"/>
+						</Border.Effect>
+
 						<StackPanel>
 
-							<CheckBox Content="Show deleted"
-                                      IsChecked="{Binding ShowDeleted}"
-                                      Foreground="{DynamicResource AppFontColorPrimary}"
-                                      Margin="0,3"/>
+							<!-- ===== SHOW ===== -->
+							<TextBlock Text="SHOW"
+									   FontSize="11"
+									   FontWeight="SemiBold"
+									   Opacity="0.55"
+									   Margin="0,0,0,2"/>
 
-							<CheckBox Content="Show favourites"
-                                      IsChecked="{Binding ShowFavourites}"
-                                      Foreground="{DynamicResource AppFontColorPrimary}"
-                                      Margin="0,3"/>
+							<CheckBox Content="All"
+									  FontWeight="SemiBold"
+									  Style="{StaticResource SwitchCheckBoxStyle}"
+									  IsChecked="{Binding ShowFilter.IsAll}"/>
 
-							<CheckBox Content="Show excluded"
-                                      IsChecked="{Binding ShowExcluded}"
-                                      Foreground="{DynamicResource AppFontColorPrimary}"
-                                      Margin="0,3"/>
+							<ItemsControl ItemsSource="{Binding ShowFilter.Options}" Margin="0,6,0,0">
+								<ItemsControl.ItemsPanel>
+									<ItemsPanelTemplate>
+										<WrapPanel/>
+									</ItemsPanelTemplate>
+								</ItemsControl.ItemsPanel>
+								<ItemsControl.ItemTemplate>
+									<DataTemplate>
+										<CheckBox Content="{Binding Name}"
+												  IsChecked="{Binding IsChecked}"
+												  Style="{StaticResource ChipCheckBoxStyle}"/>
+									</DataTemplate>
+								</ItemsControl.ItemTemplate>
+							</ItemsControl>
 
-							<!-- Második szint: kattintásra lenyílik a platformok listája -->
-							<Expander Header="Source"
-                                      Foreground="{DynamicResource AppFontColorPrimary}"
-                                      Margin="0,3">
-								<ItemsControl ItemsSource="{Binding Sources}"
-                                              Margin="15,3,0,0">
-									<ItemsControl.ItemTemplate>
-										<DataTemplate>
-											<CheckBox Content="{Binding Name}"
-                                                      IsChecked="{Binding IsChecked}"
-                                                      Foreground="{DynamicResource AppFontColorPrimary}"
-                                                      Margin="0,2"/>
-										</DataTemplate>
-									</ItemsControl.ItemTemplate>
-								</ItemsControl>
-							</Expander>
+							<Border Height="1"
+									Background="{DynamicResource AppTitlebarBackground}"
+									Margin="0,4,0,10"/>
+
+							<!-- ===== SOURCE ===== -->
+							<TextBlock Text="SOURCE"
+									   FontSize="11"
+									   FontWeight="SemiBold"
+									   Opacity="0.55"
+									   Margin="0,0,0,2"/>
+
+							<CheckBox Content="All"
+									  FontWeight="SemiBold"
+									  Style="{StaticResource SwitchCheckBoxStyle}"
+									  IsChecked="{Binding SourceFilter.IsAll}"/>
+
+							<ItemsControl ItemsSource="{Binding SourceFilter.Options}" Margin="0,6,0,0">
+								<ItemsControl.ItemsPanel>
+									<ItemsPanelTemplate>
+										<WrapPanel/>
+									</ItemsPanelTemplate>
+								</ItemsControl.ItemsPanel>
+								<ItemsControl.ItemTemplate>
+									<DataTemplate>
+										<CheckBox Content="{Binding Name}"
+												  IsChecked="{Binding IsChecked}"
+												  Style="{StaticResource ChipCheckBoxStyle}"/>
+									</DataTemplate>
+								</ItemsControl.ItemTemplate>
+							</ItemsControl>
 
 						</StackPanel>
 					</Border>
@@ -345,5 +496,5 @@
 
 			</StackPanel>
 		</Grid>
-    </Grid>
+	</Grid>
 </UserControl>
