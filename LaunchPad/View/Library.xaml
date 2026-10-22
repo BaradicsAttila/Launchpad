@@ -282,12 +282,11 @@
 				</Trigger>
 			</Style.Triggers>
 		</Style>
-		<DataTemplate x:Key="GameCardTemplate">
+        <DataTemplate x:Key="GameCardTemplate">
 			<Border>
 
 			</Border>
 		</DataTemplate>
-
 	</UserControl.Resources>
 	<Grid>
 		<Grid.RowDefinitions>
@@ -314,7 +313,7 @@
                 <Run Text="{Binding Games.Count, Mode=OneWay}"/>
 			</TextBlock>
 			<TextBlock Text="Sort by:" Grid.Column="2" Grid.Row="0"/>
-			<TextBlock Text="Display:" Grid.Column="5" Grid.Row="0"/>
+			<TextBlock Text="Filter:" Grid.Column="5" Grid.Row="0"/>
 			<Border				
                 CornerRadius="5"
                 Background="{DynamicResource AppTitlebarBackground}"
@@ -496,5 +495,16 @@
 
 			</StackPanel>
 		</Grid>
+        <ItemsControl ItemsSource="{Binding Games}" ItemTemplate="{StaticResource GameCardTemplate}">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <ScrollViewer>
+						<StackPanel/>
+                        
+                    </ScrollViewer>
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            
+        </ItemsControl>
 	</Grid>
 </UserControl>
