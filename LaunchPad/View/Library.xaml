@@ -495,7 +495,7 @@
 
 			</StackPanel>
 		</Grid>
-        <ItemsControl ItemsSource="{Binding Games}" ItemTemplate="{StaticResource GameCardTemplate}">
+        <!--<ItemsControl ItemsSource="{Binding Games}" ItemTemplate="{StaticResource GameCardTemplate}">
             <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
                     <ScrollViewer>
@@ -505,6 +505,6 @@
                 </ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
             
-        </ItemsControl>
+        </ItemsControl>-->
 	</Grid>
 </UserControl>
