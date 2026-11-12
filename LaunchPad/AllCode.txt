@@ -1,0 +1,4739 @@
+
+===== App.xaml =====
+
+<Application x:Class="LaunchPad.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:LaunchPad">
+    <Application.Resources>
+		<FontFamily x:Key="IconsFill">pack://application:,,,/Resources/Fonts/Phosphor/fill/#Phosphor-Fill</FontFamily>
+		<FontFamily x:Key="IconsDef">pack://application:,,,/Resources/Fonts/Phosphor/regular/#Phosphor</FontFamily>
+
+	</Application.Resources>
+</Application>
+
+
+===== App.xaml.cs =====
+
+using System;
+using System.Linq;
+using System.Windows;
+using LaunchPad;
+using LaunchPad.Services;
+using LaunchPad.View;
+using LaunchPad.ViewModel;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace LaunchPad
+{
+    public partial class App : Application
+    {
+        private ServiceProvider _serviceProvider;
+        public static ServiceProvider ServiceProvider { get; private set; }
+
+        protected override async void OnStartup(StartupEventArgs e)
+        {
+            base.OnStartup(e);
+
+            // Amig a vegleges MainWindow meg nem jelenik, ne alljon le az app csak
+            // azert, mert kozben (pl. a progressWindow.Close() es a mainWindow.Show()
+            // kozott) pillanatnyilag nincs nyitva ablak. Alapertelmezesben
+            // (ShutdownMode.OnLastWindowClose) ez azonnali kilepest okozna.
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+            var services = new ServiceCollection();
+
+            services.AddSingleton<GameStorage>();
+            services.AddSingleton<SettingsStorage>();
+
+            services.AddSingleton<GameService>();
+            services.AddSingleton<SettingsService>();
+            services.AddSingleton<GameScanner>();
+            services.AddSingleton<GameInstallWatcher>();
+
+            services.AddTransient<HomeViewModel>();
+            services.AddTransient<LibraryViewModel>();
+            services.AddTransient<SettingsViewModel>();
+
+            _serviceProvider = services.BuildServiceProvider();
+            ServiceProvider = _serviceProvider;
+
+            var settingsService = _serviceProvider.GetRequiredService<SettingsService>();
+            var gameService = _serviceProvider.GetRequiredService<GameService>();
+
+            bool isFirstRun = gameService.Games.Count == 0;
+
+            var progressWindow = new ScanProgressWindow();
+            progressWindow.Show();
+
+            // A gyors scannerek MINDIG lefutnak, minden inditaskor.
+            await gameService.ScanAndMergeAsync(progressWindow);
+
+            // Eltunt jatekok jelolese - olcso, csak File.Exists ellenorzes.
+            gameService.MarkMissingGamesAsDeleted();
+
+            if (isFirstRun)
+            {
+                progressWindow.Hide();
+
+                var setupWindow = new CustomFolders();
+                var result = setupWindow.ShowDialog();
+
+                if (result == true && setupWindow.WantsScan && setupWindow.SelectedFolders.Count > 0)
+                {
+                    var folders = setupWindow.SelectedFolders.ToList();
+
+                    settingsService.Current.CustomGameFolders = folders;
+                    foreach (var folder in folders)
+                        settingsService.Current.CustomFolderLastScanUtc[folder] = DateTime.UtcNow;
+                    settingsService.Save();
+
+                    progressWindow.Show();
+                    await gameService.DeepScanAndMergeAsync(folders, progressWindow);
+                }
+            }
+            else if (settingsService.Current.CustomGameFolders.Count > 0)
+            {
+                // Nem elso inditas: a mar megadott custom foldereket NEM
+                // scanneljuk ujra automatikusan - csak ha valtozast jeleznek.
+                var changedFolders = gameService.GetChangedCustomFolders(
+                    settingsService.Current.CustomGameFolders,
+                    settingsService.Current.CustomFolderLastScanUtc);
+
+                if (changedFolders.Count > 0)
+                {
+                    progressWindow.Show();
+                    await gameService.DeepScanAndMergeAsync(changedFolders, progressWindow);
+
+                    foreach (var folder in changedFolders)
+                        settingsService.Current.CustomFolderLastScanUtc[folder] = DateTime.UtcNow;
+                    settingsService.Save();
+                }
+            }
+
+            progressWindow.Close();
+
+            var installWatcher = _serviceProvider.GetRequiredService<GameInstallWatcher>();
+            installWatcher.Start();
+
+            var mainWindow = new MainWindow();
+            Application.Current.MainWindow = mainWindow;   
+                                                           
+            mainWindow.Show();
+
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
+        }
+
+        protected override void OnExit(ExitEventArgs e)
+        {
+            var gameService = _serviceProvider.GetRequiredService<GameService>();
+
+            foreach (var game in gameService.Games.Where(g => g.ActiveSession != null))
+                game.EndSession();
+
+            gameService.Save();
+
+            var settingsService = _serviceProvider.GetRequiredService<SettingsService>();
+            settingsService.Save();
+
+            var installWatcher = _serviceProvider.GetRequiredService<GameInstallWatcher>();
+            installWatcher.Dispose();
+
+            base.OnExit(e);
+        }
+    }
+}
+
+===== AssemblyInfo.cs =====
+
+using System.Windows;
+
+[assembly: ThemeInfo(
+	ResourceDictionaryLocation.None,            //where theme specific resource dictionaries are located
+												//(used if a resource is not found in the page,
+												// or application resource dictionaries)
+	ResourceDictionaryLocation.SourceAssembly   //where the generic resource dictionary is located
+												//(used if a resource is not found in the page,
+												// app, or any theme specific resource dictionaries)
+)]
+
+
+===== Helpers\IconHelper.cs =====
+
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+
+namespace LaunchPad.Helpers
+{
+	public static class IconHelper
+	{
+		private static readonly Guid IID_ShellItemImageFactory =
+			new("bcc18b79-ba16-442f-80c4-8a59c30c463b");
+
+		[ComImport, Guid("bcc18b79-ba16-442f-80c4-8a59c30c463b"),
+		 InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+		private interface IShellItemImageFactory
+		{
+			[PreserveSig]
+			int GetImage(SIZE size, SIIGBF flags, out IntPtr phbm);
+		}
+
+		[StructLayout(LayoutKind.Sequential)]
+		private struct SIZE
+		{
+			public int cx, cy;
+			public SIZE(int x, int y) { cx = x; cy = y; }
+		}
+
+		[Flags]
+		private enum SIIGBF
+		{
+			ResizeToFit = 0x00,
+			BiggerSizeOk = 0x01,
+			IconOnly = 0x04,
+		}
+
+		[DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+		private static extern void SHCreateItemFromParsingName(
+			string path, IntPtr pbc, ref Guid riid, out IShellItemImageFactory factory);
+
+		[DllImport("gdi32.dll")]
+		private static extern bool DeleteObject(IntPtr hObject);
+
+		public static ImageSource? GetIcon(string? exePath, int size = 128)
+		{
+			if (string.IsNullOrEmpty(exePath)) return null;
+
+			// Perjelek -> backslash, relatív részek feloldása
+			try { exePath = Path.GetFullPath(exePath); }
+			catch { return null; }
+
+			if (!File.Exists(exePath)) return null;
+
+			return GetShellIcon(exePath, size) ?? GetLegacyIcon(exePath);
+		}
+
+		private static ImageSource? GetShellIcon(string exePath, int size)
+		{
+			IntPtr hBitmap = IntPtr.Zero;
+			try
+			{
+				var iid = IID_ShellItemImageFactory;
+				SHCreateItemFromParsingName(exePath, IntPtr.Zero, ref iid, out var factory);
+
+				int hr = factory.GetImage(new SIZE(size, size),
+										  SIIGBF.IconOnly | SIIGBF.BiggerSizeOk,
+										  out hBitmap);
+				if (hr != 0 || hBitmap == IntPtr.Zero)
+				{
+					System.Diagnostics.Debug.WriteLine($"[IconHelper] GetImage hiba 0x{hr:X8}: {exePath}");
+					return null;
+				}
+
+				var source = Imaging.CreateBitmapSourceFromHBitmap(
+					hBitmap, IntPtr.Zero, Int32Rect.Empty,
+					BitmapSizeOptions.FromEmptyOptions());
+				source.Freeze();
+				return source;
+			}
+			catch (Exception ex)
+			{
+				System.Diagnostics.Debug.WriteLine($"[IconHelper] Shell hiba: {exePath} | {ex.Message}");
+				return null;
+			}
+			finally
+			{
+				if (hBitmap != IntPtr.Zero) DeleteObject(hBitmap);
+			}
+		}
+
+		// Fallback: a régi 32x32-es módszer, még mindig jobb, mint a semmi
+		private static ImageSource? GetLegacyIcon(string exePath)
+		{
+			try
+			{
+				using var icon = System.Drawing.Icon.ExtractAssociatedIcon(exePath);
+				if (icon == null) return null;
+
+				var source = Imaging.CreateBitmapSourceFromHIcon(
+					icon.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+				source.Freeze();
+				return source;
+			}
+			catch { return null; }
+		}
+	}
+}
+
+===== Helpers\TextBoxHelper.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+
+namespace LaunchPad.Helpers
+{
+	public static class TextBoxHelper
+	{
+		public static string GetPlaceholder(DependencyObject obj) =>
+			(string)obj.GetValue(PlaceholderProperty);
+
+		public static void SetPlaceholder(DependencyObject obj, string value) =>
+			obj.SetValue(PlaceholderProperty, value);
+
+		public static readonly DependencyProperty PlaceholderProperty =
+			DependencyProperty.RegisterAttached(
+				"Placeholder",
+				typeof(string),
+				typeof(TextBoxHelper),
+				new FrameworkPropertyMetadata(
+					defaultValue: null,
+					propertyChangedCallback: OnPlaceholderChanged)
+				);
+
+		private static void OnPlaceholderChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+		{
+			if (d is TextBox textBoxControl)
+			{
+				if (!textBoxControl.IsLoaded)
+				{
+					// Ensure that the events are not added multiple times
+					textBoxControl.Loaded -= TextBoxControl_Loaded;
+					textBoxControl.Loaded += TextBoxControl_Loaded;
+				}
+
+				// Először mindig leszedjük, hogy ne duplázódjon
+				textBoxControl.TextChanged -= TextBoxControl_TextChanged;
+				textBoxControl.GotKeyboardFocus -= TextBoxControl_GotKeyboardFocus;
+				textBoxControl.LostKeyboardFocus -= TextBoxControl_LostKeyboardFocus;
+
+				textBoxControl.TextChanged += TextBoxControl_TextChanged;
+				textBoxControl.GotKeyboardFocus += TextBoxControl_GotKeyboardFocus;
+				textBoxControl.LostKeyboardFocus += TextBoxControl_LostKeyboardFocus;
+
+				// If the adorner exists, invalidate it to draw the current text
+				if (GetOrCreateAdorner(textBoxControl, out PlaceholderAdorner adorner))
+				{
+					adorner.InvalidateVisual();
+					UpdateAdornerVisibility(textBoxControl, textBoxControl.IsKeyboardFocused);
+				}
+			}
+		}
+
+		private static void TextBoxControl_Loaded(object sender, RoutedEventArgs e)
+		{
+			if (sender is TextBox textBoxControl)
+			{
+				textBoxControl.Loaded -= TextBoxControl_Loaded;
+				UpdateAdornerVisibility(textBoxControl, textBoxControl.IsKeyboardFocused);
+			}
+		}
+
+		private static void TextBoxControl_TextChanged(object sender, TextChangedEventArgs e)
+		{
+			if (sender is TextBox textBoxControl)
+				UpdateAdornerVisibility(textBoxControl, textBoxControl.IsKeyboardFocused);
+		}
+
+		private static void TextBoxControl_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+		{
+			if (sender is TextBox textBoxControl)
+				UpdateAdornerVisibility(textBoxControl, hasFocus: true);
+		}
+
+		private static void TextBoxControl_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+		{
+			if (sender is TextBox textBoxControl)
+				UpdateAdornerVisibility(textBoxControl, hasFocus: false);
+		}
+
+		private static void UpdateAdornerVisibility(TextBox textBoxControl, bool hasFocus)
+		{
+			if (!GetOrCreateAdorner(textBoxControl, out PlaceholderAdorner adorner))
+				return;
+
+			// Csak akkor látszik, ha üres a mező ÉS nincs benne a fókusz
+			adorner.Visibility = (textBoxControl.Text.Length == 0 && !hasFocus)
+				? Visibility.Visible
+				: Visibility.Hidden;
+		}
+
+		private static bool GetOrCreateAdorner(TextBox textBoxControl, out PlaceholderAdorner adorner)
+		{
+			// Get the adorner layer
+			AdornerLayer layer = AdornerLayer.GetAdornerLayer(textBoxControl);
+
+			// If null, it doesn't exist or the control's template isn't loaded
+			if (layer == null)
+			{
+				adorner = null;
+				return false;
+			}
+
+			// Layer exists, try to find the adorner
+			adorner = layer.GetAdorners(textBoxControl)?.OfType<PlaceholderAdorner>().FirstOrDefault();
+
+			// Adorner never added to control, so add it
+			if (adorner == null)
+			{
+				adorner = new PlaceholderAdorner(textBoxControl);
+				layer.Add(adorner);
+			}
+
+			return true;
+		}
+
+		public class PlaceholderAdorner : Adorner
+		{
+			public PlaceholderAdorner(TextBox textBox) : base(textBox)
+			{
+				// Ne nyelje el a kattintást, hogy az a TextBox-ig eljusson
+				IsHitTestVisible = false;
+			}
+
+			protected override void OnRender(DrawingContext drawingContext)
+			{
+				TextBox textBoxControl = (TextBox)AdornedElement;
+
+				string placeholderValue = TextBoxHelper.GetPlaceholder(textBoxControl);
+
+				if (string.IsNullOrEmpty(placeholderValue))
+					return;
+				var placeholderBrush = ((Brush)Application.Current.Resources["AppFontColorPrimary"]).Clone();
+				placeholderBrush.Opacity = 0.7;
+				// Create the formatted text object
+				FormattedText text = new FormattedText(
+											placeholderValue,
+											System.Globalization.CultureInfo.CurrentCulture,
+											textBoxControl.FlowDirection,
+											new Typeface(textBoxControl.FontFamily,
+														 textBoxControl.FontStyle,
+														 textBoxControl.FontWeight,
+														 textBoxControl.FontStretch),
+											textBoxControl.FontSize,
+
+											placeholderBrush,
+											VisualTreeHelper.GetDpi(textBoxControl).PixelsPerDip);
+
+				text.MaxTextWidth = System.Math.Max(textBoxControl.ActualWidth - textBoxControl.Padding.Left - textBoxControl.Padding.Right, 10);
+				text.MaxTextHeight = System.Math.Max(textBoxControl.ActualHeight, 10);
+
+				// Render based on padding of the control, to try and match where the textbox places text
+				Point renderingOffset = new Point(textBoxControl.Padding.Left, textBoxControl.Padding.Top);
+
+				// Template contains the content part; adjust sizes to try and align the text
+				if (textBoxControl.Template.FindName("PART_ContentHost", textBoxControl) is FrameworkElement part)
+				{
+					Point partPosition = part.TransformToAncestor(textBoxControl).Transform(new Point(0, 0));
+					renderingOffset.X += partPosition.X;
+					renderingOffset.Y += partPosition.Y;
+
+					text.MaxTextWidth = System.Math.Max(part.ActualWidth - renderingOffset.X, 10);
+					text.MaxTextHeight = System.Math.Max(part.ActualHeight, 10);
+					double verticalOffset = (part.ActualHeight - text.Height) / 2;
+					renderingOffset.Y += System.Math.Max(verticalOffset, 0);
+				}
+
+				// Draw the text
+
+				drawingContext.DrawText(text, renderingOffset);
+			}
+		}
+	}
+}
+
+===== LaunchPad.csproj =====
+
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>LaunchPad</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="Resources\Data\Settings.json" />
+    <None Remove="Resources\Fonts\Phosphor\fill\Phosphor-Fill.ttf" />
+    <None Remove="Resources\Fonts\Phosphor\regular\Phosphor.ttf" />
+    <None Remove="Resources\Images\Lp_Ikon.png" />
+    <None Remove="Resources\Images\Preview.jpg" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Data\Settings.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Resources\Fonts\Phosphor\fill\Phosphor-Fill.ttf">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Resources\Fonts\Phosphor\regular\Phosphor.ttf">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Resources\Images\Lp_Ikon.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Resources\Images\Preview.jpg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Resource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="Services\GameStorage.cs">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Resources\Data\Games.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\Data\TestGames.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
+
+
+===== MainWindow.xaml =====
+
+<Window x:Class="LaunchPad.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:LaunchPad"
+        xmlns:view="clr-namespace:LaunchPad.View"
+		xmlns:vm ="clr-namespace:LaunchPad.ViewModel"
+        mc:Ignorable="d"
+        Title="MainWindow" Height="900" Width="1600"
+		Icon="/Resources/Images/Lp_Ikon.png"
+		MinWidth="530"
+		MinHeight="500"
+		FontFamily="{DynamicResource AppFontFamily}">
+    <WindowChrome.WindowChrome>
+		<WindowChrome GlassFrameThickness="0" CaptionHeight="0"/>
+	</WindowChrome.WindowChrome>
+	<Window.DataContext>
+		<vm:MainPageVM/>
+	</Window.DataContext>
+    <Grid Background="{DynamicResource AppBackgroundSecondary}" Focusable="True" MouseDown="Grid_MouseDown">
+		<Grid.RowDefinitions>
+			<RowDefinition Height="45"/>
+			<RowDefinition/>
+		</Grid.RowDefinitions>
+		<view:TitleBar 
+			Grid.Row="0"/>
+		<Grid Grid.Row="1">
+			<Grid.ColumnDefinitions>
+				<ColumnDefinition Width="235"/>
+				<ColumnDefinition/>
+			</Grid.ColumnDefinitions>
+			<view:LeftMenu/>
+			<ContentControl Grid.Column="1" Content="{Binding CurrentPage}"/>
+		</Grid>
+	</Grid>
+
+</Window>
+
+
+===== MainWindow.xaml.cs =====
+
+using System;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Threading;
+
+namespace LaunchPad
+{
+	public partial class MainWindow : Window
+	{
+		public MainWindow()
+		{
+			InitializeComponent();
+		}
+
+		private void Grid_MouseDown(object sender, MouseButtonEventArgs e)
+		{
+			((UIElement)sender).Focus();
+		}
+    }
+}
+
+===== Model\AppSettings.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace LaunchPad.Model
+{
+	public class AppSettings
+	{
+		public string FontFamily { get; set; } = "Segoe UI";
+		public string FontColorPrimary { get; set; } = "#CCCCCC";
+		public string FontColorSecondary { get; set; } = "#8A6BE2";
+		public string BorderColorPrimary { get; set; } = "#5A3BB2";
+		public string BorderColorSecondary { get; set; } = "#222222";
+		public string MenuBackgroundPrimary { get; set; } = "#111119";
+		public string MenuBackgroundSecondary { get; set; } = "#15151C";
+		public string BackgroundPrimary { get; set; } = "#1F1F1F";
+		public string BackgroundSecondary { get; set; } = "#1A1A1A";
+		public string TitlebarBackground { get; set; } = "#444444";
+		public string SelectedMenuItemBackground { get; set; } = "#408A2BE2";
+		public List<string> CustomGameFolders { get; set; } = new();
+		public Dictionary<string, DateTime> CustomFolderLastScanUtc { get; set; } = new();
+        public List<string> ExcludedGamePaths { get; set; } = new();
+    }
+}
+
+
+===== Model\Game.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using CommunityToolkit.Mvvm.ComponentModel;
+
+namespace LaunchPad.Model
+{
+	public partial class Game : ObservableObject
+	{
+		public string Name { get; init; }
+
+		[ObservableProperty]
+		private string source;
+		[ObservableProperty]
+		private bool isFavourite;
+		[ObservableProperty]
+		private bool isDeleted;
+        [ObservableProperty]
+        private bool _isExcluded;
+        public List<Session> Sessions { get; set; } = new();
+		[JsonIgnore]
+		public int TotalPlaytimeSeconds => Sessions.Sum(s => s.DurationSeconds);
+		[JsonIgnore]
+		public int LaunchCount => Sessions.Count;
+		[JsonIgnore]
+		public DateTime? LastPlayedUtc => Sessions.Any()
+			? Sessions.Max(s => s.EndedAt)
+			: null;
+
+		[JsonIgnore]
+		public string Platform => DetectPlatform(Source);
+
+		private static string DetectPlatform(string? path)
+		{
+			if (string.IsNullOrEmpty(path)) return "Other";
+			var lower = path.ToLowerInvariant();
+
+			if (lower.Contains(@"\steamapps\")) return "Steam";
+			if (lower.Contains(@"\epic games\")) return "Epic";
+			if (lower.Contains(@"\ubisoft game launcher\")) return "Ubisoft";
+			if (lower.Contains(@"\ea games\") || lower.Contains(@"\origin games\")) return "EA";
+			if (lower.Contains(@"\gog galaxy\")) return "GOG"; 
+			if (lower.Contains("battle.net") || lower.Contains("blizzard")) return "Battle.net";
+			return "Other";
+		}
+		[JsonIgnore]
+		public string LastPlayedFormatted
+		{
+			get
+			{
+				if (LastPlayedUtc == null) return "Never";
+				int difference = (int)(DateTime.UtcNow - LastPlayedUtc.Value).TotalSeconds;
+				string formatted = difference switch
+				{
+					< 60 => "Just now",
+					< 3600 => "Less than an hour ago",
+					< 86400 => $"{difference / 3600} hour{(difference / 3600 == 1 ? "" : "s")} ago",
+					< 2592000 => $"{difference / 86400} day{(difference / 86400 == 1 ? "" : "s")} ago",
+					< 31536000 => $"{difference / 2592000} month{(difference / 2592000 == 1 ? "" : "s")} ago",
+					_ => $"{difference / 31536000} year{(difference / 31536000 == 1 ? "" : "s")} ago"
+
+				};
+				return formatted;
+			}
+		}
+		[JsonIgnore]
+		public int AverageSessionSeconds
+		{
+			get
+			{
+				if (!Sessions.Any()) return 0;
+				return (int)Sessions.Average(s => s.DurationSeconds);
+			}
+		}
+		[JsonIgnore]
+		public int Last24hPlaytimeSeconds
+		{
+			get
+			{
+				if (!Sessions.Any()) return 0;
+				DateTime lastday = DateTime.UtcNow.AddDays(-1);
+				return Sessions
+					.Where(s => s.EndedAt >= lastday)
+					.Sum(s => s.DurationSeconds);
+			}
+		}
+		[JsonIgnore]
+		public int LastWeekPlaytimeSeconds
+		{
+			get
+			{
+				if (!Sessions.Any()) return 0;
+				DateTime lastweek = DateTime.UtcNow.AddDays(-7);
+				return Sessions
+					.Where(s => s.EndedAt >= lastweek)
+					.Sum(s => s.DurationSeconds);
+			}
+		}
+		[JsonIgnore]
+		public int LastMonthPlaytimeSeconds
+		{
+			get
+			{
+				if (!Sessions.Any()) return 0;
+				DateTime lastmonth = DateTime.UtcNow.AddMonths(-1);
+				return Sessions
+					.Where(s => s.EndedAt >= lastmonth)
+					.Sum(s => s.DurationSeconds);
+			}
+		}
+		[JsonIgnore]
+		public int LastYearPlaytimeSeconds
+		{
+			get
+			{
+				if (!Sessions.Any()) return 0;
+				DateTime lastyear = DateTime.UtcNow.AddYears(-1);
+				return Sessions
+					.Where(s => s.EndedAt >= lastyear)
+					.Sum(s => s.DurationSeconds);
+			}
+		}
+		[JsonIgnore]
+		public bool? IsGame => DetermineIsGame(Source);
+		private ImageSource? _icon;
+		private bool _iconLoaded;
+
+		[JsonIgnore]
+		public ImageSource? Icon
+		{
+			get
+			{
+				if (!_iconLoaded)
+				{
+					_icon = LaunchPad.Helpers.IconHelper.GetIcon(Source, 128);
+					_iconLoaded = true;
+				}
+				return _icon;
+			}
+		}
+		[JsonIgnore]
+		public Session? ActiveSession { get; private set; }
+		[JsonIgnore]
+		public string LastPlayedLabel => LastPlayedUtc.HasValue
+			? $"Played {this.LastPlayedFormatted}"
+			: "Never played";
+
+		partial void OnSourceChanged(string value)
+		{
+			_iconLoaded = false;
+			OnPropertyChanged(nameof(Icon));
+			OnPropertyChanged(nameof(IsGame));
+			OnPropertyChanged(nameof(Platform));
+		}
+		public void StartSession()
+		{
+			var session = new Session
+			{
+				StartedAt = DateTime.UtcNow,
+				EndedAt = DateTime.UtcNow,
+			};
+			Sessions.Add(session);
+			ActiveSession = session;
+			RefreshDerivedProperties();
+		}
+
+		public void FlushSession()
+		{
+			if (ActiveSession == null) return;
+
+			ActiveSession.EndedAt = DateTime.UtcNow;
+			RefreshDerivedProperties();
+		}
+		public void EndSession()
+		{
+			if (ActiveSession == null) return;
+			ActiveSession.EndedAt = DateTime.UtcNow;
+			ActiveSession = null;
+			RefreshDerivedProperties();
+		}
+		private void RefreshDerivedProperties()
+		{
+			OnPropertyChanged(nameof(TotalPlaytimeSeconds));
+			OnPropertyChanged(nameof(LaunchCount));
+			OnPropertyChanged(nameof(LastPlayedUtc));
+			OnPropertyChanged(nameof(LastPlayedFormatted));
+			OnPropertyChanged(nameof(LastPlayedLabel));
+			OnPropertyChanged(nameof(AverageSessionSeconds));
+			OnPropertyChanged(nameof(Last24hPlaytimeSeconds));
+			OnPropertyChanged(nameof(LastWeekPlaytimeSeconds));
+			OnPropertyChanged(nameof(LastMonthPlaytimeSeconds));
+			OnPropertyChanged(nameof(LastYearPlaytimeSeconds));
+		}
+		private static readonly string[] GamePlatformPaths = new[]
+		{
+			"steam", "steamapps", "epic games", "epicgames",
+			"ubisoft", "uplay", "origin", "ea games", "ea desktop",
+			"gog galaxy", "gog.com", "battle.net", "battlenet",
+			"rockstar games", "riot games", "2k games", "blizzard"
+		};
+
+		private static bool? DetermineIsGame(string? exepath)
+		{
+			if (string.IsNullOrEmpty(exepath)) return null;
+			string lower = exepath.ToLowerInvariant();
+			return GamePlatformPaths.Any(p => lower.Contains(p));
+
+
+
+		}
+		private static ImageSource? ExtractIcon(string? exePath)
+		{
+			if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
+				return null;
+
+			try
+			{
+				using var icon = System.Drawing.Icon.ExtractAssociatedIcon(exePath);
+				if (icon == null) return null;
+
+				return Imaging.CreateBitmapSourceFromHIcon(
+					icon.Handle,
+					System.Windows.Int32Rect.Empty,
+					BitmapSizeOptions.FromEmptyOptions());
+			}
+			catch { return null; }
+		}
+		[JsonConstructor]
+		public Game(string name, string source, bool isFavourite, bool isDeleted, List<Session>? sessions)
+		{
+			Name = name;
+			this.source = source;
+			this.isFavourite = isFavourite;
+			this.isDeleted = isDeleted;
+			Sessions = sessions ?? new List<Session>();
+		}
+
+
+	}
+}
+
+===== Model\Session.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Text.Json.Serialization;
+
+namespace LaunchPad.Model
+{
+	public class Session
+	{
+		public DateTime StartedAt { get; set; }
+		public DateTime EndedAt { get; set; }
+		[JsonIgnore]
+		public int DurationSeconds => (int)(EndedAt-StartedAt).TotalSeconds;
+	}
+}
+
+
+===== Services\GameinstallWatcher.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using LaunchPad.Model;
+
+namespace LaunchPad.Services
+{
+	public class GameInstallWatcher : IDisposable
+	{
+		private readonly GameService _gameService;
+		private readonly SettingsService _settingsService;
+		private readonly List<FileSystemWatcher> _watchers = new();
+		private readonly Dictionary<string, FileSystemWatcher> _exeWatchersByPath = new();
+		private readonly object _debounceLock = new();
+		private Timer? _debounceTimer;
+
+		private static readonly TimeSpan DebounceDelay = TimeSpan.FromSeconds(5);
+
+		public GameInstallWatcher(GameService gameService, SettingsService settingsService)
+		{
+			_gameService = gameService;
+			_settingsService = settingsService;
+		}
+		public void Start()
+		{
+			foreach (var steamLibrary in GameScanner.FindSteamLibraries())
+			{
+				var commonPath = Path.Combine(steamLibrary, "steamapps", "common");
+				WatchForNewFolders(commonPath);
+			}
+
+			WatchForNewFiles(
+				@"C:\ProgramData\Epic\EpicGamesLauncher\Data\Manifests",
+				"*.item");
+
+			WatchForNewFolders(@"C:\Program Files (x86)\Ubisoft\Ubisoft Game Launcher\games");
+
+			WatchForNewFolders(@"C:\Program Files\EA Games");
+			WatchForNewFolders(@"C:\Program Files (x86)\Origin Games");
+
+			WatchForNewFolders(@"C:\Program Files (x86)\GOG Galaxy\Games");
+
+			WatchForNewFiles(
+				Path.Combine(
+					Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+					@"Microsoft\Windows\Start Menu\Programs"),
+				"*.lnk",
+				includeSubdirectories: true);
+
+			WatchForNewFiles(
+				@"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
+				"*.lnk",
+				includeSubdirectories: true);
+			foreach (var customFolder in _settingsService.Current.CustomGameFolders)
+			{
+				WatchCustomFolder(customFolder);
+			}
+
+			// Minden mar ismert jatek exejere kulon, azonnali torles-figyelo -
+			// launchertol fuggetlenul eszreveszi, ha egy konkret exe eltunik,
+			// meg akkor is, ha a korulotte levo mappa nem valtozik (pl.
+			// Battle.net-es jatekok, amiket a fenti mappa-watcherek nem
+			// figyelnek).
+			foreach (var game in _gameService.Games)
+				WatchGameExecutable(game);
+
+			_gameService.Games.CollectionChanged += (_, e) =>
+			{
+				if (e.NewItems != null)
+					foreach (Game g in e.NewItems)
+						WatchGameExecutable(g);
+			};
+
+			foreach (var game in _gameService.Games)
+				game.PropertyChanged += OnGamePropertyChanged;
+		}
+
+		public void WatchCustomFolder(string path)
+		{
+			WatchForNewFolders(path);
+		}
+
+		private void WatchForNewFolders(string path)
+		{
+			if (!Directory.Exists(path)) return;
+
+			var watcher = new FileSystemWatcher(path)
+			{
+				NotifyFilter = NotifyFilters.DirectoryName,
+				IncludeSubdirectories = false,
+				EnableRaisingEvents = true
+			};
+			watcher.Created += OnChangeDetected;
+			watcher.Deleted += OnChangeDetected;
+			_watchers.Add(watcher);
+		}
+
+		private void WatchForNewFiles(string path, string filter, bool includeSubdirectories = false)
+		{
+			if (!Directory.Exists(path)) return;
+
+			var watcher = new FileSystemWatcher(path, filter)
+			{
+				NotifyFilter = NotifyFilters.FileName,
+				IncludeSubdirectories = includeSubdirectories,
+				EnableRaisingEvents = true
+			};
+			watcher.Created += OnChangeDetected;
+			watcher.Deleted += OnChangeDetected;
+			_watchers.Add(watcher);
+		}
+
+		private void OnChangeDetected(object sender, FileSystemEventArgs e)
+		{
+			lock (_debounceLock)
+			{
+				_debounceTimer?.Dispose();
+				_debounceTimer = new Timer(
+					callback: async _ => await RunScanSafelyAsync(),
+					state: null,
+					dueTime: DebounceDelay,
+					period: Timeout.InfiniteTimeSpan);
+			}
+		}
+
+		private async Task RunScanSafelyAsync()
+		{
+			try
+			{
+				await _gameService.ScanAndMergeAsync();
+				_gameService.MarkMissingGamesAsDeleted();
+			}
+			catch
+			{
+			}
+		}
+
+		// -------------------------------------------------------------------
+		// PER-EXE TORLES FIGYELES
+		// -------------------------------------------------------------------
+
+		private void OnGamePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+		{
+			// Ha a jatek Source-a megvaltozik (pl. "Change exe path"), az uj
+			// path-ra is fel kell venni egy watchert.
+			if (e.PropertyName != nameof(Game.Source)) return;
+			if (sender is Game game) WatchGameExecutable(game);
+		}
+
+		private void WatchGameExecutable(Game game)
+		{
+			if (string.IsNullOrWhiteSpace(game.Source)) return;
+			if (_exeWatchersByPath.ContainsKey(game.Source)) return; // ezt a fajlt mar figyeljuk
+
+			var folder = Path.GetDirectoryName(game.Source);
+			var fileName = Path.GetFileName(game.Source);
+			if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) return;
+
+			var watcher = new FileSystemWatcher(folder, fileName)
+			{
+				NotifyFilter = NotifyFilters.FileName,
+				IncludeSubdirectories = false,
+				EnableRaisingEvents = true
+			};
+
+			watcher.Deleted += (_, __) => MarkGameAsDeletedByPath(game.Source);
+			watcher.Renamed += (_, __) => MarkGameAsDeletedByPath(game.Source);
+			watcher.Created += (_, __) => MarkGameAsRestoredByPath(game.Source);
+
+			_exeWatchersByPath[game.Source] = watcher;
+			_watchers.Add(watcher);
+		}
+
+		private void MarkGameAsDeletedByPath(string path)
+		{
+			var game = _gameService.Games.FirstOrDefault(g =>
+				string.Equals(g.Source, path, StringComparison.OrdinalIgnoreCase));
+
+			if (game != null && !game.IsDeleted)
+				game.IsDeleted = true;
+		}
+
+		// Ha ugyanoda (ugyanaz a mappa + fajlnev) kerul vissza az exe - pl. a
+		// felhasznalo ujra letolti a torolt jatekot - azonnal, kulon scan
+		// nelkul visszaallitjuk a lathato allapotot.
+		private void MarkGameAsRestoredByPath(string path)
+		{
+			var game = _gameService.Games.FirstOrDefault(g =>
+				string.Equals(g.Source, path, StringComparison.OrdinalIgnoreCase));
+
+			if (game != null && game.IsDeleted)
+				game.IsDeleted = false;
+		}
+
+		public void Dispose()
+		{
+			foreach (var watcher in _watchers)
+			{
+				watcher.EnableRaisingEvents = false;
+				watcher.Dispose();
+			}
+			_watchers.Clear();
+			_exeWatchersByPath.Clear();
+
+			lock (_debounceLock)
+			{
+				_debounceTimer?.Dispose();
+				_debounceTimer = null;
+			}
+		}
+	}
+}
+
+===== Services\GameScanner.cs =====
+
+using System.Diagnostics;
+using System.IO;
+using System.Text.Json;
+using Microsoft.Win32;
+
+namespace LaunchPad.Services;
+
+public class GameScanResult
+{
+    public string ExePath { get; set; } = string.Empty;
+    public string GameName { get; set; } = string.Empty;
+    public string Source { get; set; } = string.Empty;
+}
+
+public class GameScanner
+{
+    #region Source Priority
+
+    // Lower number = more trustworthy name
+    // Steam and Epic store exact official names in their manifest files
+    // Start Menu and Registry store display names — usually good
+    // Folder-based scanners (Ubisoft, EA, GOG, BattleNet) only know the folder name
+    // Deep scan is the least reliable — it only knows the exe filename
+    private static readonly Dictionary<string, int> SourcePriority = new()
+    {
+        { "Steam",     1 },
+        { "Epic",      1 },
+        { "StartMenu", 2 },
+        { "Registry",  3 },
+        { "Ubisoft",   4 },
+        { "EA",        4 },
+        { "GOG",       4 },
+        { "BattleNet", 4 },
+        { "Scan",      5 },
+    };
+
+    #endregion
+
+    #region Excluded Folders (for deep scan)
+
+    private static readonly HashSet<string> ExcludedFolders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        @"C:\Windows",
+        @"C:\Windows\WinSxS",
+        @"C:\Windows\System32",
+        @"C:\Windows\SysWOW64",
+        @"C:\Windows\servicing",
+        @"C:\System Volume Information",
+        @"C:\Recovery",
+        @"C:\$Recycle.Bin",
+        @"C:\ProgramData\Microsoft",
+        @"C:\ProgramData\Package Cache",
+    };
+
+    private static readonly HashSet<string> ExcludedAppDataFolders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Microsoft", "Temp", "Google", "Mozilla", "Packages"
+    };
+
+    #endregion
+
+    #region Excluded Path Roots (instant scannerekhez)
+
+    private static readonly string WindowsFolder =
+        Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+
+    private static readonly string AppDataRoaming =
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
+    private static readonly string AppDataLocal =
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+    private static readonly string ProgramFiles =
+        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+
+    private static readonly string ProgramFilesX86 =
+        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+
+    // Program Files alatt ELVILEG minden telepitett program ott van (nem csak
+    // jatek), ezert csak az ismert jatek-platform almappakat engedjuk at -
+    // ezek ugyanazok, ahova a GOG/Ubisoft/EA/Steam sajat scannerei is neznek.
+    private static readonly string[] KnownGamePlatformMarkers = new[]
+    {
+        @"\steamapps\common\",
+        @"\gog galaxy\games\",
+        @"\ubisoft game launcher\games\",
+        @"\ea games\",
+        @"\origin games\",
+    };
+
+    private static bool IsKnownGamePlatformPath(string path)
+    {
+        var lower = path.ToLowerInvariant();
+        return KnownGamePlatformMarkers.Any(marker => lower.Contains(marker));
+    }
+
+    private static bool IsUnderExcludedRoot(string path)
+    {
+        if (path.StartsWith(WindowsFolder, StringComparison.OrdinalIgnoreCase)) return true;
+        if (path.StartsWith(AppDataRoaming, StringComparison.OrdinalIgnoreCase)) return true;
+        if (path.StartsWith(AppDataLocal, StringComparison.OrdinalIgnoreCase)) return true;
+
+        bool underProgramFiles =
+            path.StartsWith(ProgramFiles, StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith(ProgramFilesX86, StringComparison.OrdinalIgnoreCase);
+
+        // Program Files alatt csak akkor engedjuk at, ha ismert jatek-platform
+        // almappaban van - minden mas (Office, bongeszok, launcher-kliensek,
+        // driverek, stb.) kizarva.
+        if (underProgramFiles && !IsKnownGamePlatformPath(path))
+            return true;
+
+        return false;
+    }
+
+    #endregion
+
+    #region Excluded Exe Name Patterns
+
+    // Ha egy exe fajlneve (kiterjesztes nelkul, kisbetuvel) TARTALMAZZA
+    // valamelyik mintat, akkor nem tekintjuk a jatek fo exe-jenek, meg akkor
+    // sem, ha nagy meretu (pl. egy beagyazott DirectX/VCRedist telepito
+    // tobb tiz MB is lehet). Meret-fuggetlen: egy 2 MB-os Unity-s jatek
+    // exe-je pontosan ugy elfogadhato, mint egy 200 MB-os AAA jatek exe-je.
+    private static readonly string[] ExcludedExeNamePatterns = new[]
+    {
+        "uninstall", "unins000", "unins001", "unwise",
+        "setup", "install",
+        "vcredist", "vc_redist", "vcruntime",
+        "directx", "dxsetup", "dxwebsetup",
+        "dotnetfx", "dotnet-runtime", "windowsdesktop-runtime",
+        "crashreport", "crashpad", "crashhandler", "unitycrashhandler",
+        "redist", "prerequisites", "prereq",
+        "updater", "update_checker", "autoupdate",
+        "eossdk", "easyanticheat_setup", "battleye_setup",
+        "vcpp", "oalinst"
+    };
+
+    // Mappanevek, amik ha barhol szerepelnek a teljes elerhesi utban,
+    // telepito/futtatokornyezet mappara utalnak (pl. Steam sajat
+    // "Steamworks Common Redistributables" alkalmazasa a _CommonRedist alatt).
+    private static readonly string[] ExcludedPathSegments = new[]
+    {
+        "_commonredist", "commonredist", "_redist", "redistributables"
+    };
+
+    /// <summary>
+    /// True, ha a fajlnev VAGY a teljes eleresi ut alapjan valoszinuleg NEM
+    /// a jatek fo exe-je, hanem valamilyen telepito/segedprogram/
+    /// futtatokornyezet.
+    /// </summary>
+    private static bool IsLikelyNonGameExecutable(string filePath)
+    {
+        var nameOnly = Path.GetFileNameWithoutExtension(filePath).ToLowerInvariant();
+        if (ExcludedExeNamePatterns.Any(pattern => nameOnly.Contains(pattern)))
+            return true;
+
+        var lowerPath = filePath.ToLowerInvariant();
+        if (ExcludedPathSegments.Any(segment => lowerPath.Contains(segment)))
+            return true;
+
+        return false;
+    }
+
+    #endregion
+
+    // -------------------------------------------------------------------------
+    // PUBLIC API
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Runs all instant scans (Start Menu, Steam, Epic, Ubisoft, EA, GOG, Battle.net).
+    /// Returns in seconds — no waiting.
+    /// </summary>
+    public async Task<List<GameScanResult>> RunInstantScansAsync(IProgress<string>? progress = null)
+    {
+        return await Task.Run(() =>
+        {
+            var results = new List<GameScanResult>();
+
+            // Key = exe path (case-insensitive), Value = best result found so far
+            // When the same exe is found by two scanners, the one with lower priority
+            // number wins and its name replaces the worse one
+            var seen = new Dictionary<string, GameScanResult>(StringComparer.OrdinalIgnoreCase);
+
+            // Run highest priority sources first so their names are already in seen
+            // when lower priority sources find the same exe
+            progress?.Report("Reading Steam manifests...");
+            var steamResults = GetFromSteam();
+            Debug.WriteLine($"[RunInstantScansAsync] Steam talalatok: {steamResults.Count}");
+            AddRange(results, seen, steamResults);
+
+            progress?.Report("Reading Epic Games manifests...");
+            var epicResults = GetFromEpic();
+            Debug.WriteLine($"[RunInstantScansAsync] Epic talalatok: {epicResults.Count}");
+            AddRange(results, seen, epicResults);
+
+            progress?.Report("Reading Start Menu shortcuts...");
+            var startMenuResults = GetFromStartMenu();
+            Debug.WriteLine($"[RunInstantScansAsync] StartMenu talalatok: {startMenuResults.Count}");
+            AddRange(results, seen, startMenuResults);
+
+            // A Registry-scanner (GetFromRegistry) SZANDEKOSAN ki van kapcsolva:
+            // minden telepitett programot felvett (Office, Chrome, driverek, stb.),
+            // nem csak jatekokat, es valodi extra jatekot nem hozott a StartMenu/
+            // Steam/Epic/GOG/Ubisoft/EA/BattleNet scannerekhez kepest.
+            // A metodus megmaradt lent, ha kesobb megis kellene.
+
+            progress?.Report("Reading Ubisoft Connect...");
+            var ubisoftResults = GetFromUbisoft();
+            Debug.WriteLine($"[RunInstantScansAsync] Ubisoft talalatok: {ubisoftResults.Count}");
+            AddRange(results, seen, ubisoftResults);
+
+            progress?.Report("Reading EA App...");
+            var eaResults = GetFromEA();
+            Debug.WriteLine($"[RunInstantScansAsync] EA talalatok: {eaResults.Count}");
+            AddRange(results, seen, eaResults);
+
+            progress?.Report("Reading GOG Galaxy...");
+            var gogResults = GetFromGOG();
+            Debug.WriteLine($"[RunInstantScansAsync] GOG talalatok: {gogResults.Count}");
+            AddRange(results, seen, gogResults);
+
+            progress?.Report("Reading Battle.net...");
+            var battleNetResults = GetFromBattleNet();
+            Debug.WriteLine($"[RunInstantScansAsync] BattleNet talalatok: {battleNetResults.Count}");
+            AddRange(results, seen, battleNetResults);
+
+            progress?.Report($"Done — found {results.Count} games.");
+            Debug.WriteLine($"[RunInstantScansAsync] OSSZESEN (dedup utan): {results.Count}");
+            return results;
+        });
+    }
+
+    /// <summary>
+    /// Scans specific folders for .exe files (for pirated / portable games).
+    /// Call this only when the user explicitly requests it.
+    /// </summary>
+    public async Task<List<GameScanResult>> ScanFoldersAsync(
+        IEnumerable<string> folders,
+        IProgress<string>? progress = null)
+    {
+        return await Task.Run(() =>
+        {
+            var results = new List<GameScanResult>();
+            var seen = new Dictionary<string, GameScanResult>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var folder in folders)
+            {
+                if (!Directory.Exists(folder)) continue;
+
+                progress?.Report($"Scanning {folder}...");
+
+                foreach (var result in EnumerateSafe(folder))
+                {
+                    AddRange(results, seen, new List<GameScanResult> { result });
+                    progress?.Report($"Found: {result.GameName}");
+                }
+            }
+
+            Debug.WriteLine($"[ScanFoldersAsync] Osszesen talalt exe: {results.Count}");
+            return results;
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // 1. START MENU SHORTCUTS
+    // -------------------------------------------------------------------------
+
+    private static List<GameScanResult> GetFromStartMenu()
+    {
+        var results = new List<GameScanResult>();
+
+        var roots = new[]
+        {
+            // System-wide — apps installed for all users (admin installs)
+            @"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
+
+            // Per-user — apps installed just for the current user
+            // Using SpecialFolder instead of hardcoding C:\Users\Atesz\...
+            // so it works on every machine regardless of username
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                @"Microsoft\Windows\Start Menu\Programs")
+        };
+
+        foreach (var root in roots)
+        {
+            Debug.WriteLine($"[GetFromStartMenu] Mappa: {root} | letezik: {Directory.Exists(root)}");
+            if (!Directory.Exists(root)) continue;
+
+            var lnkFiles = Directory.EnumerateFiles(root, "*.lnk", SearchOption.AllDirectories).ToList();
+            Debug.WriteLine($"[GetFromStartMenu] {root} alatt talalt .lnk fajlok: {lnkFiles.Count}");
+
+            foreach (var lnk in lnkFiles)
+            {
+                try
+                {
+                    var target = ResolveShortcut(lnk);
+
+                    if (string.IsNullOrEmpty(target)) continue;
+                    if (!target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!File.Exists(target)) continue;
+
+                    if (IsUnderExcludedRoot(target))
+                    {
+                        Debug.WriteLine($"[GetFromStartMenu] Kihagyva (tiltott mappa): {target}");
+                        continue;
+                    }
+
+                    if (IsLikelyNonGameExecutable(target))
+                    {
+                        Debug.WriteLine($"[GetFromStartMenu] Kihagyva (nev alapjan telepito/segedprogram): {target}");
+                        continue;
+                    }
+
+                    results.Add(new GameScanResult
+                    {
+                        ExePath = target,
+                        GameName = Path.GetFileNameWithoutExtension(lnk),
+                        Source = "StartMenu"
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[StartMenu scan] Skipped {lnk}: {ex.Message}");
+                }
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Resolves a .lnk shortcut file to its target path.
+    /// Uses the built-in WScript.Shell COM object — no NuGet package needed.
+    /// </summary>
+    private static string? ResolveShortcut(string lnkPath)
+    {
+        try
+        {
+            var shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!);
+            var shortcut = shell!.GetType().InvokeMember(
+                "CreateShortcut",
+                System.Reflection.BindingFlags.InvokeMethod,
+                null, shell, new object[] { lnkPath });
+
+            var target = shortcut!.GetType().InvokeMember(
+                "TargetPath",
+                System.Reflection.BindingFlags.GetProperty,
+                null, shortcut, null) as string;
+
+            return target;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. REGISTRY UNINSTALL KEYS
+    // -------------------------------------------------------------------------
+    //
+    // MEGJEGYZES: ezt a scannert a RunInstantScansAsync jelenleg NEM hivja meg,
+    // mert minden telepitett programot felvesz (nem csak jatekokat). A metodus
+    // megmaradt, arra az esetre, ha kesobb megis szukseg lenne ra (pl. szigorubb
+    // szures mellett).
+
+    private static List<GameScanResult> GetFromRegistry()
+    {
+        var results = new List<GameScanResult>();
+
+        var keys = new[]
+        {
+            // 64-bit programs
+            @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+            // 32-bit programs running on 64-bit Windows (WOW64 compatibility layer)
+            @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+        };
+
+        foreach (var key in keys)
+        {
+            using var root = Registry.LocalMachine.OpenSubKey(key);
+            if (root == null)
+            {
+                Debug.WriteLine($"[GetFromRegistry] Nem sikerult megnyitni: {key}");
+                continue;
+            }
+
+            var subKeyNames = root.GetSubKeyNames();
+            Debug.WriteLine($"[GetFromRegistry] {key} alatt talalt bejegyzesek: {subKeyNames.Length}");
+
+            foreach (var subKeyName in subKeyNames)
+            {
+                try
+                {
+                    using var sub = root.OpenSubKey(subKeyName);
+                    if (sub == null) continue;
+
+                    var installLocation = sub.GetValue("InstallLocation")?.ToString();
+                    var displayName = sub.GetValue("DisplayName")?.ToString();
+
+                    if (string.IsNullOrEmpty(installLocation)) continue;
+                    if (!Directory.Exists(installLocation)) continue;
+                    if (IsUnderExcludedRoot(installLocation)) continue;
+
+                    // Only scan the top-level install folder (not recursive)
+                    // since InstallLocation points directly to the game folder
+                    var exe = Directory.EnumerateFiles(installLocation, "*.exe")
+                        .Where(f => !IsLikelyNonGameExecutable(f))
+                        .Select(f => new FileInfo(f))
+                        .OrderByDescending(f => f.Length)
+                        .FirstOrDefault();
+
+                    if (exe == null) continue;
+
+                    results.Add(new GameScanResult
+                    {
+                        ExePath = exe.FullName,
+                        GameName = displayName ?? Path.GetFileNameWithoutExtension(exe.Name),
+                        Source = "Registry"
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[GetFromRegistry] HIBA a(z) {subKeyName} feldolgozasakor: {ex.Message}");
+                }
+            }
+        }
+
+        return results;
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. STEAM MANIFESTS
+    // -------------------------------------------------------------------------
+
+    private static List<GameScanResult> GetFromSteam()
+    {
+        var results = new List<GameScanResult>();
+
+        var foundLibraries = FindSteamLibraries();
+        Debug.WriteLine($"[GetFromSteam] Talalt Steam library-k: {string.Join(", ", foundLibraries)}");
+
+        foreach (var library in foundLibraries)
+        {
+            var steamAppsPath = Path.Combine(library, "steamapps");
+            if (!Directory.Exists(steamAppsPath))
+            {
+                Debug.WriteLine($"[GetFromSteam] Nem letezik: {steamAppsPath}");
+                continue;
+            }
+
+            var manifests = Directory.EnumerateFiles(steamAppsPath, "appmanifest_*.acf").ToList();
+            Debug.WriteLine($"[GetFromSteam] {steamAppsPath} alatt talalt manifest fajlok: {manifests.Count}");
+
+            foreach (var manifest in manifests)
+            {
+                try
+                {
+                    var lines = File.ReadAllLines(manifest);
+
+                    // Steam's .acf format: lines look like   "name"    "The Witcher 3"
+                    // Split by " and take index [3] to get the value
+                    var name = lines
+                        .FirstOrDefault(l => l.TrimStart().StartsWith("\"name\""))
+                        ?.Split('"')[3];
+
+                    var installDir = lines
+                        .FirstOrDefault(l => l.TrimStart().StartsWith("\"installdir\""))
+                        ?.Split('"')[3];
+
+                    Debug.WriteLine($"[GetFromSteam] Manifest: {Path.GetFileName(manifest)} | name={name} | installdir={installDir}");
+
+                    if (string.IsNullOrEmpty(installDir)) continue;
+
+                    var gamePath = Path.Combine(steamAppsPath, "common", installDir);
+                    if (!Directory.Exists(gamePath))
+                    {
+                        Debug.WriteLine($"[GetFromSteam] gamePath nem letezik: {gamePath}");
+                        continue;
+                    }
+
+                    var candidates = Directory.EnumerateFiles(gamePath, "*.exe", SearchOption.AllDirectories)
+                        .Where(f => !IsLikelyNonGameExecutable(f))
+                        .Select(f => new FileInfo(f))
+                        .OrderByDescending(f => f.Length)
+                        .ToList();
+
+                    Debug.WriteLine($"[GetFromSteam] {gamePath} alatt (szuro utan) marad exe-k: " +
+                        string.Join(", ", candidates.Select(f => $"{f.Name} ({f.Length / 1024} KB)")));
+
+                    var exe = candidates.FirstOrDefault();
+
+                    if (exe == null)
+                    {
+                        Debug.WriteLine($"[GetFromSteam] Nincs hasznalhato exe ehhez: {installDir}");
+                        continue;
+                    }
+
+                    results.Add(new GameScanResult
+                    {
+                        ExePath = exe.FullName,
+                        GameName = name ?? installDir,
+                        Source = "Steam"
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[GetFromSteam] HIBA a(z) {manifest} feldolgozasakor: {ex}");
+                }
+            }
+        }
+
+        return results;
+    }
+
+    public static List<string> FindSteamLibraries()
+    {
+        var libraries = new List<string>();
+
+        var defaultSteam = @"C:\Program Files (x86)\Steam";
+        Debug.WriteLine($"[FindSteamLibraries] Alapertelmezett Steam mappa letezik: {Directory.Exists(defaultSteam)} ({defaultSteam})");
+
+        if (Directory.Exists(defaultSteam))
+            libraries.Add(defaultSteam);
+
+        // Steam stores all library paths in this file
+        // This handles users who have games on D:\, E:\, etc.
+        var vdfPath = Path.Combine(defaultSteam, @"steamapps\libraryfolders.vdf");
+        Debug.WriteLine($"[FindSteamLibraries] libraryfolders.vdf letezik: {File.Exists(vdfPath)} ({vdfPath})");
+
+        if (!File.Exists(vdfPath)) return libraries;
+
+        try
+        {
+            foreach (var line in File.ReadAllLines(vdfPath))
+            {
+                // Lines look like:   "path"    "D:\\Games\\Steam"
+                if (!line.TrimStart().StartsWith("\"path\"")) continue;
+
+                var path = line.Split('"')[3].Replace(@"\\", @"\");
+                Debug.WriteLine($"[FindSteamLibraries] vdf-ben talalt path: {path} | letezik: {Directory.Exists(path)}");
+                if (Directory.Exists(path))
+                    libraries.Add(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[FindSteamLibraries] HIBA a vdf feldolgozasakor: {ex}");
+        }
+
+        return libraries;
+    }
+
+    // -------------------------------------------------------------------------
+    // 4. EPIC GAMES MANIFESTS
+    // -------------------------------------------------------------------------
+
+    private static List<GameScanResult> GetFromEpic()
+    {
+        var results = new List<GameScanResult>();
+
+        var manifestsPath = @"C:\ProgramData\Epic\EpicGamesLauncher\Data\Manifests";
+        Debug.WriteLine($"[GetFromEpic] Manifests mappa letezik: {Directory.Exists(manifestsPath)} ({manifestsPath})");
+        if (!Directory.Exists(manifestsPath)) return results;
+
+        var itemFiles = Directory.EnumerateFiles(manifestsPath, "*.item").ToList();
+        Debug.WriteLine($"[GetFromEpic] Talalt .item fajlok: {itemFiles.Count}");
+
+        foreach (var file in itemFiles)
+        {
+            try
+            {
+                var json = File.ReadAllText(file);
+                var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                var installPath = root.TryGetProperty("InstallLocation", out var loc)
+                    ? loc.GetString() : null;
+                var displayName = root.TryGetProperty("DisplayName", out var name)
+                    ? name.GetString() : null;
+
+                // Epic provides the exact exe to launch — most accurate method
+                var launchExe = root.TryGetProperty("LaunchExecutable", out var exe)
+                    ? exe.GetString() : null;
+
+                Debug.WriteLine($"[GetFromEpic] {Path.GetFileName(file)} | name={displayName} | installPath={installPath} | launchExe={launchExe}");
+
+                if (string.IsNullOrEmpty(installPath) || !Directory.Exists(installPath)) continue;
+
+                string? exePath = null;
+
+                // Epic pontosan megmondja, melyik exe-t kell inditani - ez a
+                // legmegbizhatobb forras, itt nincs is szukseg nev-alapu szuresre.
+                if (!string.IsNullOrEmpty(launchExe))
+                {
+					var fullPath = Path.GetFullPath(Path.Combine(installPath, launchExe));
+                    if (File.Exists(fullPath))
+                        exePath = fullPath;
+                }
+
+                // Fallback, ha a LaunchExecutable hianyzik vagy egy wrapper-re mutat
+                exePath ??= Directory.EnumerateFiles(installPath, "*.exe", SearchOption.AllDirectories)
+                    .Where(f => !IsLikelyNonGameExecutable(f))
+                    .Select(f => new FileInfo(f))
+                    .OrderByDescending(f => f.Length)
+                    .FirstOrDefault()?.FullName;
+
+                if (exePath == null)
+                {
+                    Debug.WriteLine($"[GetFromEpic] Nem talalhato hasznalhato exe ehhez: {displayName}");
+                    continue;
+                }
+
+                results.Add(new GameScanResult
+                {
+                    ExePath = exePath,
+                    GameName = displayName ?? Path.GetFileNameWithoutExtension(exePath),
+                    Source = "Epic"
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GetFromEpic] HIBA a(z) {file} feldolgozasakor: {ex.Message}");
+            }
+        }
+
+        return results;
+    }
+
+    // -------------------------------------------------------------------------
+    // 5. UBISOFT CONNECT
+    // -------------------------------------------------------------------------
+
+    private static List<GameScanResult> GetFromUbisoft()
+    {
+        var results = new List<GameScanResult>();
+
+        var root = @"C:\Program Files (x86)\Ubisoft\Ubisoft Game Launcher\games";
+        Debug.WriteLine($"[GetFromUbisoft] Mappa letezik: {Directory.Exists(root)} ({root})");
+        if (!Directory.Exists(root)) return results;
+
+        var gameFolders = Directory.EnumerateDirectories(root).ToList();
+        Debug.WriteLine($"[GetFromUbisoft] Talalt almappak: {gameFolders.Count}");
+
+        foreach (var gameFolder in gameFolders)
+        {
+            try
+            {
+                var exe = Directory.EnumerateFiles(gameFolder, "*.exe", SearchOption.AllDirectories)
+                    .Where(f => !IsLikelyNonGameExecutable(f))
+                    .Select(f => new FileInfo(f))
+                    .OrderByDescending(f => f.Length)
+                    .FirstOrDefault();
+
+                if (exe == null)
+                {
+                    Debug.WriteLine($"[GetFromUbisoft] Nincs hasznalhato exe ehhez: {gameFolder}");
+                    continue;
+                }
+
+                results.Add(new GameScanResult
+                {
+                    ExePath = exe.FullName,
+                    GameName = Path.GetFileName(gameFolder),
+                    Source = "Ubisoft"
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GetFromUbisoft] HIBA a(z) {gameFolder} feldolgozasakor: {ex.Message}");
+            }
+        }
+
+        return results;
+    }
+
+    // -------------------------------------------------------------------------
+    // 6. EA APP (and old Origin)
+    // -------------------------------------------------------------------------
+
+    private static List<GameScanResult> GetFromEA()
+    {
+        var results = new List<GameScanResult>();
+
+        var roots = new[]
+        {
+            @"C:\Program Files\EA Games",
+            @"C:\Program Files (x86)\Origin Games",
+        };
+
+        foreach (var root in roots)
+        {
+            Debug.WriteLine($"[GetFromEA] Mappa letezik: {Directory.Exists(root)} ({root})");
+        }
+
+        foreach (var root in roots.Where(Directory.Exists))
+        {
+            var gameFolders = Directory.EnumerateDirectories(root).ToList();
+            Debug.WriteLine($"[GetFromEA] {root} alatt talalt almappak: {gameFolders.Count}");
+
+            foreach (var gameFolder in gameFolders)
+            {
+                try
+                {
+                    var exe = Directory.EnumerateFiles(gameFolder, "*.exe", SearchOption.AllDirectories)
+                        .Where(f => !IsLikelyNonGameExecutable(f))
+                        .Select(f => new FileInfo(f))
+                        .OrderByDescending(f => f.Length)
+                        .FirstOrDefault();
+
+                    if (exe == null)
+                    {
+                        Debug.WriteLine($"[GetFromEA] Nincs hasznalhato exe ehhez: {gameFolder}");
+                        continue;
+                    }
+
+                    results.Add(new GameScanResult
+                    {
+                        ExePath = exe.FullName,
+                        GameName = Path.GetFileName(gameFolder),
+                        Source = "EA"
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[GetFromEA] HIBA a(z) {gameFolder} feldolgozasakor: {ex.Message}");
+                }
+            }
+        }
+
+        return results;
+    }
+
+    // -------------------------------------------------------------------------
+    // 7. GOG GALAXY
+    // -------------------------------------------------------------------------
+
+    private static List<GameScanResult> GetFromGOG()
+    {
+        var results = new List<GameScanResult>();
+
+        var root = @"C:\Program Files (x86)\GOG Galaxy\Games";
+        Debug.WriteLine($"[GetFromGOG] Mappa letezik: {Directory.Exists(root)} ({root})");
+        if (!Directory.Exists(root)) return results;
+
+        var gameFolders = Directory.EnumerateDirectories(root).ToList();
+        Debug.WriteLine($"[GetFromGOG] Talalt almappak: {gameFolders.Count}");
+
+        foreach (var gameFolder in gameFolders)
+        {
+            try
+            {
+                var exe = Directory.EnumerateFiles(gameFolder, "*.exe", SearchOption.AllDirectories)
+                    .Where(f => !IsLikelyNonGameExecutable(f))
+                    .Select(f => new FileInfo(f))
+                    .OrderByDescending(f => f.Length)
+                    .FirstOrDefault();
+
+                if (exe == null)
+                {
+                    Debug.WriteLine($"[GetFromGOG] Nincs hasznalhato exe ehhez: {gameFolder}");
+                    continue;
+                }
+
+                results.Add(new GameScanResult
+                {
+                    ExePath = exe.FullName,
+                    GameName = Path.GetFileName(gameFolder),
+                    Source = "GOG"
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GetFromGOG] HIBA a(z) {gameFolder} feldolgozasakor: {ex.Message}");
+            }
+        }
+
+        return results;
+    }
+
+    // -------------------------------------------------------------------------
+    // 8. BATTLE.NET
+    // -------------------------------------------------------------------------
+
+    private static List<GameScanResult> GetFromBattleNet()
+    {
+        var results = new List<GameScanResult>();
+
+        var roots = new[]
+        {
+            @"C:\Program Files (x86)\Overwatch",
+            @"C:\Program Files\Overwatch 2",
+            @"C:\Program Files (x86)\World of Warcraft",
+            @"C:\Program Files (x86)\Diablo IV",
+            @"C:\Program Files (x86)\Hearthstone",
+            @"C:\Program Files (x86)\StarCraft II",
+            @"C:\Program Files (x86)\Heroes of the Storm",
+            @"C:\Program Files (x86)\Call of Duty",
+        };
+
+        foreach (var root in roots)
+        {
+            Debug.WriteLine($"[GetFromBattleNet] Mappa letezik: {Directory.Exists(root)} ({root})");
+        }
+
+        foreach (var root in roots.Where(Directory.Exists))
+        {
+            try
+            {
+                var exe = Directory.EnumerateFiles(root, "*.exe", SearchOption.AllDirectories)
+                    .Where(f => !IsLikelyNonGameExecutable(f))
+                    .Select(f => new FileInfo(f))
+                    .OrderByDescending(f => f.Length)
+                    .FirstOrDefault();
+
+                if (exe == null)
+                {
+                    Debug.WriteLine($"[GetFromBattleNet] Nincs hasznalhato exe ehhez: {root}");
+                    continue;
+                }
+
+                results.Add(new GameScanResult
+                {
+                    ExePath = exe.FullName,
+                    GameName = Path.GetFileName(root),
+                    Source = "BattleNet"
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GetFromBattleNet] HIBA a(z) {root} feldolgozasakor: {ex.Message}");
+            }
+        }
+
+        return results;
+    }
+
+    // -------------------------------------------------------------------------
+    // 9. SAFE RECURSIVE SCAN (for pirated / portable games)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Egy adott gyoker mappa (pl. D:\Games) kozvetlen almappait KULON-KULON
+    /// jateknak tekinti, es mindegyikbol csak EGY, legvalloszinubb fo exe-t
+    /// valaszt ki (lasd FindBestGameExecutable) - igy egy tobb-exes jatekmappabol
+    /// (pl. Content Manager + acServer + acs.exe egy Assetto Corsa mappaban)
+    /// nem lesz tobb kulon talalat.
+    /// </summary>
+    private IEnumerable<GameScanResult> EnumerateSafe(string root)
+    {
+        if (ShouldExclude(root)) yield break;
+
+        // Kozvetlenul a gyoker alatt levo exe-k - ha valaki egy mappaba
+        // egyetlen exe-t masol be (portable jatek almappa nelkul), azt is
+        // onallo talalatkent vegyuk fel.
+        IEnumerable<string> rootFiles = Enumerable.Empty<string>();
+        try { rootFiles = Directory.EnumerateFiles(root, "*.exe"); }
+        catch (UnauthorizedAccessException) { }
+        catch (IOException) { }
+
+        foreach (var f in rootFiles)
+        {
+            if (IsLikelyNonGameExecutable(f)) continue;
+            yield return new GameScanResult
+            {
+                ExePath = f,
+                GameName = Path.GetFileNameWithoutExtension(f),
+                Source = "Scan"
+            };
+        }
+
+        // Minden kozvetlen almappa = egy jatek. Csak a legvalloszinubb fo
+        // exe-t vesszuk fel belole, nem a mappafaban talalhato OSSZES exe-t.
+        IEnumerable<string> subDirs = Enumerable.Empty<string>();
+        try { subDirs = Directory.EnumerateDirectories(root); }
+        catch (UnauthorizedAccessException) { }
+        catch (IOException) { }
+
+        foreach (var subDir in subDirs)
+        {
+            if (ShouldExclude(subDir)) continue;
+
+            var bestExe = FindBestGameExecutable(subDir);
+            if (bestExe == null) continue;
+
+            yield return new GameScanResult
+            {
+                ExePath = bestExe.FullName,
+                GameName = Path.GetFileName(subDir),
+                Source = "Scan"
+            };
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 9b. FO EXE KIVALASZTASA TOBB JELOLT KOZUL (pontozasos rendszer)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Rekurzivan osszegyujti egy mappafaban talalhato, valoszinuleg jatek-exe
+    /// jeloltjeit, majd tobb jel kombinaciojaval (nev-egyezes, beagyazott
+    /// metaadat, PE subsystem, Unreal Engine konvenciok, meret) kivalasztja
+    /// a legvalloszinubb fo exe-t. Sokkal megbizhatobb, mint a puszta
+    /// fajlmeret alapjan valasztas.
+    /// </summary>
+    private static FileInfo? FindBestGameExecutable(string folder)
+    {
+        var candidates = new List<FileInfo>();
+        CollectExeCandidates(folder, candidates);
+
+        if (candidates.Count == 0) return null;
+        if (candidates.Count == 1) return candidates[0];
+
+        var folderName = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar));
+        var normalizedFolderName = NormalizeForComparison(folderName);
+
+        return candidates
+            .Select(f => new { File = f, Score = ScoreExecutable(f, normalizedFolderName) })
+            .OrderByDescending(x => x.Score)
+            .ThenByDescending(x => x.File.Length)
+            .First()
+            .File;
+    }
+
+    private static void CollectExeCandidates(string folder, List<FileInfo> candidates)
+    {
+        if (ShouldExclude(folder)) return;
+
+        IEnumerable<string> files = Enumerable.Empty<string>();
+        try { files = Directory.EnumerateFiles(folder, "*.exe"); }
+        catch (UnauthorizedAccessException) { }
+        catch (IOException) { }
+
+        foreach (var f in files)
+        {
+            if (IsLikelyNonGameExecutable(f)) continue;
+            candidates.Add(new FileInfo(f));
+        }
+
+        IEnumerable<string> dirs = Enumerable.Empty<string>();
+        try { dirs = Directory.EnumerateDirectories(folder); }
+        catch (UnauthorizedAccessException) { }
+        catch (IOException) { }
+
+        foreach (var dir in dirs)
+            CollectExeCandidates(dir, candidates);
+    }
+
+    // Kulcsszavak, amik a beagyazott ProductName/FileDescription metaadatban
+    // arra utalnak, hogy az exe NEM a jatek fo, jatszhato binarisa.
+    private static readonly string[] NonPrimaryMetadataKeywords = new[]
+    {
+        "dedicated server", "server", "launcher", "crash", "report",
+        "updater", "uninstall", "setup", "benchmark", "editor",
+        "redistributable", "sdk", "diagnostic", "config", "tool"
+    };
+
+    private static int ScoreExecutable(FileInfo file, string normalizedFolderName)
+    {
+        int score = 0;
+        var nameOnly = Path.GetFileNameWithoutExtension(file.Name);
+
+        // 1. Fajlnev egyezik a mappa nevevel - eros jel.
+        if (NormalizeForComparison(nameOnly) == normalizedFolderName)
+            score += 100;
+
+        // 2. Beagyazott metaadat (ProductName/FileDescription) - meg erosebb
+        //    jel, mert ez tudatosan beallitott, hivatalos adat, es kiszuri
+        //    az olyan 3rd party eszkozoket is, mint a Content Manager.
+        string? productName = null;
+        string? fileDescription = null;
+        try
+        {
+            var info = FileVersionInfo.GetVersionInfo(file.FullName);
+            productName = info.ProductName;
+            fileDescription = info.FileDescription;
+        }
+        catch
+        {
+            // Nincs verzio-info beagyazva - sok portable/indie jateknal
+            // ez teljesen normalis, nem hiba.
+        }
+
+        if (!string.IsNullOrWhiteSpace(productName) &&
+            NormalizeForComparison(productName!) == normalizedFolderName)
+            score += 120;
+
+        var combinedMeta = $"{productName} {fileDescription}".ToLowerInvariant();
+        if (NonPrimaryMetadataKeywords.Any(k => combinedMeta.Contains(k)))
+            score -= 80;
+
+        // 3. Unreal Engine: a "*-Win64-Shipping.exe" a motor tenyleges
+        //    binarisa, de a hivatalos inditasi mod a suffix nelkuli wrapper
+        //    exe (pl. "Game.exe"), ha az letezik a mappaban.
+        var lowerName = nameOnly.ToLowerInvariant();
+        if (lowerName.Contains("-win64-shipping") ||
+            lowerName.Contains("-win32-shipping") ||
+            lowerName.Contains("-wingdk-shipping"))
+            score -= 40;
+
+        // 4. PE subsystem: a jatszhato jatek szinte mindig sajat ablakot nyit
+        //    (GUI subsystem), a dedicated server / CLI eszkozok altalaban
+        //    konzolosak (CUI subsystem).
+        var subsystem = TryReadPeSubsystem(file.FullName);
+        if (subsystem == PeSubsystem.WindowsGui) score += 20;
+        else if (subsystem == PeSubsystem.WindowsCui) score -= 30;
+
+        // 5. Meret, mint leggyengebb, utolso jelzes - log-skalan, hogy ne
+        //    tudjon onmagaban felulirni minden mas, erosebb jelet.
+        score += (int)Math.Log(Math.Max(file.Length, 1), 2);
+
+        return score;
+    }
+
+    /// <summary>
+    /// Csak betuket/szamokat hagy meg, kisbetusit - igy pl. a "Slime Rancher 2"
+    /// mappanev es a "SlimeRancher2" fajlnev/ProductName is egyezni fog.
+    /// </summary>
+    private static string NormalizeForComparison(string name)
+    {
+        return new string(name.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+    }
+
+    private enum PeSubsystem : ushort
+    {
+        WindowsGui = 2,
+        WindowsCui = 3,
+    }
+
+    /// <summary>
+    /// Kezzel kiolvassa a PE fejlecbol a Subsystem mezot (kulso csomag
+    /// nelkul). A Subsystem mezo pontosan 68 bajttal az Optional Header
+    /// eleje utan talalhato, es ez az offset veletlenul azonos PE32 (32 bit)
+    /// es PE32+ (64 bit) eseten is - igy nem kell kulon kezelni oket.
+    /// </summary>
+    private static PeSubsystem? TryReadPeSubsystem(string exePath)
+    {
+        try
+        {
+            using var stream = new FileStream(exePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var reader = new BinaryReader(stream);
+
+            if (stream.Length < 0x40) return null;
+
+            stream.Seek(0x3C, SeekOrigin.Begin);
+            int peHeaderOffset = reader.ReadInt32();
+
+            if (peHeaderOffset <= 0 || peHeaderOffset + 4 + 20 + 68 + 2 > stream.Length)
+                return null;
+
+            stream.Seek(peHeaderOffset, SeekOrigin.Begin);
+            uint peSignature = reader.ReadUInt32();
+            if (peSignature != 0x00004550) return null; // "PE\0\0"
+
+            // COFF File Header = 20 bajt, utana az Optional Header - a
+            // Subsystem mezo annak +68 bajt offszetjenel van.
+            stream.Seek(peHeaderOffset + 4 + 20 + 68, SeekOrigin.Begin);
+            ushort subsystem = reader.ReadUInt16();
+
+            return Enum.IsDefined(typeof(PeSubsystem), subsystem)
+                ? (PeSubsystem)subsystem
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool ShouldExclude(string path)
+    {
+        if (ExcludedFolders.Contains(path)) return true;
+        if (IsUnderExcludedRoot(path)) return true;
+
+        if (path.Contains(@"\AppData\", StringComparison.OrdinalIgnoreCase))
+        {
+            var folderName = Path.GetFileName(path);
+            if (ExcludedAppDataFolders.Contains(folderName)) return true;
+        }
+
+        return false;
+    }
+
+    // -------------------------------------------------------------------------
+    // HELPERS
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Adds results to the list, deduplicating by exe path.
+    /// When two scanners find the same exe, the one with the lower priority
+    /// number wins and its name replaces the worse one.
+    /// </summary>
+    private static void AddRange(
+        List<GameScanResult> target,
+        Dictionary<string, GameScanResult> seen,
+        List<GameScanResult> source)
+    {
+        foreach (var item in source)
+        {
+            if (seen.TryGetValue(item.ExePath, out var existing))
+            {
+                var newPriority = SourcePriority.GetValueOrDefault(item.Source, 99);
+                var existingPriority = SourcePriority.GetValueOrDefault(existing.Source, 99);
+
+                // New source is more trustworthy — upgrade the name
+                // The object reference in seen and target point to the same instance
+                // so mutating existing.GameName updates both automatically
+                if (newPriority < existingPriority)
+                {
+                    existing.GameName = item.GameName;
+                    existing.Source = item.Source;
+                }
+            }
+            else
+            {
+                seen[item.ExePath] = item;
+                target.Add(item);
+            }
+        }
+    }
+}
+
+===== Services\GameService.cs =====
+
+using LaunchPad.Model;
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.Text;
+using System.Linq;
+using System.Threading.Tasks;
+using System.IO;
+
+namespace LaunchPad.Services
+{
+	public class GameService : IDisposable
+	{
+		private readonly GameStorage _storage;
+		private readonly GameScanner _scanner;
+		private readonly SettingsService _settingsService;
+
+		// Gyors, csak File.Exists-et ellenorzo timer - torles/visszatoltes
+		// eszleleset vegzi, semmilyen mentest nem trigerel feleslegesen.
+		private readonly System.Timers.Timer _safetyTimer;
+
+		// Ritkabb timer, ami az aktiv jatszesi session-oket menti biztonsagi
+		// mentaskent, ha az app kozben osszeomlana.
+		private readonly System.Timers.Timer _sessionFlushTimer;
+
+		public ObservableCollection<Game> Games { get; } = new();
+
+		public int TotalGamesCount => Games.Count;
+
+		public GameService(GameStorage storage, GameScanner scanner, SettingsService settingsService)
+		{
+			_storage = storage;
+			_scanner = scanner;
+			_settingsService = settingsService;
+
+			var loaded = _storage.LoadGames();
+			foreach (var game in loaded)
+			{
+				SubscribeToGame(game);
+				Games.Add(game);
+			}
+			Games.CollectionChanged += OnCollectionChanged;
+
+			_safetyTimer = new System.Timers.Timer(3000);
+			_safetyTimer.Elapsed += (_, _) =>
+			{
+				MarkMissingGamesAsDeleted();
+				RestoreReappearedGames();
+			};
+			_safetyTimer.AutoReset = true;
+			_safetyTimer.Start();
+
+			_sessionFlushTimer = new System.Timers.Timer(30000);
+			_sessionFlushTimer.Elapsed += (_, _) => FlushActiveSessions();
+			_sessionFlushTimer.AutoReset = true;
+			_sessionFlushTimer.Start();
+		}
+		public async Task ScanAndMergeAsync(IProgress<string>? progress = null)
+		{
+			var results = await _scanner.RunInstantScansAsync(progress);
+			MergeWithScanResults(results);
+			Save();
+		}
+
+		public async Task DeepScanAndMergeAsync(IEnumerable<string> folders, IProgress<string>? progress = null)
+		{
+			var results = await _scanner.ScanFoldersAsync(folders, progress);
+			MergeWithScanResults(results);
+			Save();
+		}
+
+		private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+		{
+			if (e.NewItems != null)
+			{
+				foreach (Game game in e.NewItems)
+				{
+					SubscribeToGame(game);
+				}
+			}
+			Save();
+		}
+		private void SubscribeToGame(Game game)
+		{
+			game.PropertyChanged += (_, _) => Save();
+		}
+
+		public void MergeWithScanResults(List<GameScanResult> scanResults)
+		{
+			var excludedPaths = _settingsService.Current.ExcludedGamePaths;
+
+			foreach (var result in scanResults)
+			{
+				// A felhasznalo altal kifejezetten kizart (vagy "Change exe path"-
+				// szal lecserelt) path-okat egyetlen scanner sem hozhatja vissza.
+				if (excludedPaths.Any(p => string.Equals(p, result.ExePath, StringComparison.OrdinalIgnoreCase)))
+					continue;
+
+				// Kizart jatekokat nev alapjan sem "elesztunk fel" automatikusan -
+				// ha ugyanaz a nev egy UJ path-on bukkan fel, az egy uj bejegyzes
+				// lesz, nem irja felul a mar kizart regi rekordot.
+				var existing = Games.FirstOrDefault(g =>
+					!g.IsExcluded &&
+					string.Equals(g.Name, result.GameName, StringComparison.OrdinalIgnoreCase));
+
+				if (existing != null)
+				{
+					if (!string.Equals(existing.Source, result.ExePath, StringComparison.OrdinalIgnoreCase))
+						existing.Source = result.ExePath;
+
+					// A jatekot korabban torolve jeloltuk (a fajl eltunt), de a
+					// scanner most ujra megtalalta - tehat visszatoltottek.
+					if (existing.IsDeleted)
+						existing.IsDeleted = false;
+				}
+				else
+				{
+					Games.Add(new Game(
+					name: result.GameName,
+					source: result.ExePath,
+					isFavourite: false,
+					isDeleted: false,
+					sessions: null
+					));
+				}
+			}
+		}
+
+		private void FlushActiveSessions()
+		{
+			var activeSessions = Games.Where(g => g.ActiveSession != null).ToList();
+			if (!activeSessions.Any()) return;
+			foreach (var game in activeSessions) game.FlushSession();
+			Save();
+
+		}
+
+		public void MarkMissingGamesAsDeleted()
+		{
+			bool anyChanged = false;
+
+			foreach (var game in Games.Where(g => !g.IsDeleted && !g.IsExcluded))
+			{
+				if (!File.Exists(game.Source))
+				{
+					game.IsDeleted = true;
+					anyChanged = true;
+				}
+			}
+
+			if (anyChanged) Save();
+		}
+
+		/// <summary>
+		/// A korabban torolve jelolt jatekokat visszaallitja, ha a Source
+		/// path-juk idokozben ujra letezik (pl. a felhasznalo visszatoltotte
+		/// ugyanoda a jatekot). Fuggetlen a FileSystemWatcher-ektol, ezert
+		/// akkor is mukodik, ha egy mappa torlese/ujraletrehozasa miatt a
+		/// watcher esemenyei elvesznek.
+		/// </summary>
+		public void RestoreReappearedGames()
+		{
+			bool anyChanged = false;
+
+			foreach (var game in Games.Where(g => g.IsDeleted && !g.IsExcluded))
+			{
+				if (File.Exists(game.Source))
+				{
+					game.IsDeleted = false;
+					anyChanged = true;
+				}
+			}
+
+			if (anyChanged) Save();
+		}
+
+		public List<string> GetChangedCustomFolders(
+			List<string> customFolders,
+			Dictionary<string, DateTime> lastScanTimes)
+		{
+			var changed = new List<string>();
+
+			foreach (var folder in customFolders)
+			{
+				if (!Directory.Exists(folder)) continue;
+
+				var lastWrite = Directory.GetLastWriteTimeUtc(folder);
+
+				if (!lastScanTimes.TryGetValue(folder, out var lastKnown) || lastWrite > lastKnown)
+				{
+					changed.Add(folder);
+				}
+			}
+
+			return changed;
+		}
+
+		/// <summary>
+		/// A jatekot "kizartra" allitja: mostantol nem jelenik meg a Libraryban,
+		/// es a jelenlegi Source path-ja felkerul a kizart utak listajara, hogy
+		/// egyetlen jovobeli scan se hozza vissza/hozza letre ujra ugyanezen
+		/// az uton. Maga a rekord (statisztikak, session-ok) megmarad a
+		/// Games.json-ban.
+		/// </summary>
+		public void ExcludeGame(Game game)
+		{
+			AddExcludedPath(game.Source);
+			game.IsExcluded = true;
+
+			_settingsService.Save();
+			Save();
+		}
+		public void IncludeGame(Game game)
+		{
+			var excluded = _settingsService.Current.ExcludedGamePaths;
+			excluded.RemoveAll(p => string.Equals(p, game.Source, StringComparison.OrdinalIgnoreCase));
+
+			game.IsExcluded = false;
+
+			_settingsService.Save();
+			Save();
+		}
+
+		/// <summary>
+		/// Lecsereli a jatek inditando exe-jet egy uj, felhasznalo altal
+		/// kivalasztott path-ra. A REGI path felkerul a kizart utak listajara,
+		/// hogy egy kesobbi scan (ami meg mindig megtalalhatja a regi exe-t,
+		/// pl. ha az meg mindig a lemezen van) ne irja felul vissza a Source-ot.
+		/// Az uj path kozvetlenul kerul beallitasra, nem a scan-merge-en
+		/// keresztul, igy a regi es az uj path sosem utkozhet.
+		/// </summary>
+		public void ChangeGameExecutable(Game game, string newExePath)
+		{
+			var oldPath = game.Source;
+
+			if (!string.Equals(oldPath, newExePath, StringComparison.OrdinalIgnoreCase))
+				AddExcludedPath(oldPath);
+
+			game.Source = newExePath;
+
+			_settingsService.Save();
+			Save();
+		}
+
+		private void AddExcludedPath(string path)
+		{
+			if (string.IsNullOrWhiteSpace(path)) return;
+
+			var excluded = _settingsService.Current.ExcludedGamePaths;
+			bool alreadyThere = excluded.Any(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+
+			if (!alreadyThere) excluded.Add(path);
+		}
+
+
+		public void Save()
+		{
+			_storage.SaveGames(Games.ToList());
+		}
+
+		public void Dispose()
+		{
+			_safetyTimer?.Stop();
+			_safetyTimer?.Dispose();
+			_sessionFlushTimer?.Stop();
+			_sessionFlushTimer?.Dispose();
+		}
+	}
+}
+
+===== Services\GameStorage.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using LaunchPad.Model;
+
+namespace LaunchPad.Services
+{
+	public class GameStorage
+	{
+		private static readonly string DataFolder = Path.Combine(
+				Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+				"LaunchPad");
+		private static readonly string FilePath = Path.Combine(DataFolder, "Games.json");
+		private static readonly JsonSerializerOptions Options = new JsonSerializerOptions
+		{
+			WriteIndented = true,
+			PropertyNameCaseInsensitive = true
+		};
+
+		public List<Game> LoadGames()
+		{
+			if (!File.Exists(FilePath))
+			{
+				return new List<Game>();
+			}
+
+			string json = File.ReadAllText(FilePath);
+
+			if (string.IsNullOrWhiteSpace(json))
+			{
+				return new List<Game>();
+			}
+
+			return JsonSerializer.Deserialize<List<Game>>(json, Options) ?? new List<Game>();
+		}
+		public void SaveGames(List<Game> games)
+		{
+			Directory.CreateDirectory(DataFolder);
+			string json = JsonSerializer.Serialize(games, Options);
+			File.WriteAllText(FilePath, json);
+		}
+	}
+}
+
+===== Services\SettingsService.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Text;
+using System.Windows;
+using System.Windows.Media;
+using LaunchPad.Model;
+
+namespace LaunchPad.Services
+{
+	public class SettingsService
+	{
+		private readonly SettingsStorage _storage;
+		public AppSettings Current { get; private set; }
+		public SettingsService(SettingsStorage storage)
+		{
+			_storage = storage; 
+			Current = _storage.LoadSettings(); 
+			Apply(Current);
+		}
+		private static SolidColorBrush ToBrush(string hex)
+		{
+			var color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex);
+			return new SolidColorBrush(color);
+		}
+		public void Apply(AppSettings settings)
+		{
+			Current = settings;
+
+			var dict = Application.Current.Resources;
+
+			dict["AppFontFamily"] = new System.Windows.Media.FontFamily(settings.FontFamily);            
+			dict["AppFontColorPrimary"] = ToBrush(settings.FontColorPrimary);
+			dict["AppFontColorSecondary"] = ToBrush(settings.FontColorSecondary);
+			dict["AppBorderColorPrimary"] = ToBrush(settings.BorderColorPrimary);
+			dict["AppBorderColorSecondary"] = ToBrush(settings.BorderColorSecondary);
+			dict["AppMenuBackgroundPrimary"] = ToBrush(settings.MenuBackgroundPrimary);
+			dict["AppMenuBackgroundSecondary"] = ToBrush(settings.MenuBackgroundSecondary);
+			dict["AppBackgroundPrimary"] = ToBrush(settings.BackgroundPrimary);
+			dict["AppBackgroundSecondary"] = ToBrush(settings.BackgroundSecondary);
+			dict["AppTitlebarBackground"] = ToBrush(settings.TitlebarBackground);
+			dict["AppSelectedMenuItemBackground"] = ToBrush(settings.SelectedMenuItemBackground);
+		}
+		public void Save()
+		{
+			_storage.SaveSettings(Current);
+		}
+	}
+	
+}
+
+
+===== Services\SettingsStorage.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using System.Text;
+using System.Text.Json;
+using LaunchPad.Model;
+
+namespace LaunchPad.Services
+{
+	public class SettingsStorage
+	{
+		private static readonly string DataFolder = Path.Combine(
+			Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+			"LaunchPad");
+
+		private static readonly string FilePath = Path.Combine(DataFolder, "Settings.json");
+
+		private const string DefaultTemplateResourceName = "LaunchPad.Resources.Data.Settings.json";
+
+		private static readonly JsonSerializerOptions Options = new JsonSerializerOptions
+		{
+			WriteIndented = true,
+			PropertyNameCaseInsensitive = true
+		};
+
+		public AppSettings LoadSettings()
+		{
+			if (!File.Exists(FilePath))
+			{
+				SeedFromDefaultTemplate();
+			}
+
+			if (!File.Exists(FilePath))
+			{
+				return new AppSettings();
+			}
+
+			string json = File.ReadAllText(FilePath);
+
+			if (string.IsNullOrWhiteSpace(json))
+			{
+				return new AppSettings();
+			}
+
+			return JsonSerializer.Deserialize<AppSettings>(json, Options) ?? new AppSettings();
+		}
+
+		public void SaveSettings(AppSettings settings)
+		{
+			Directory.CreateDirectory(DataFolder);
+
+			string json = JsonSerializer.Serialize(settings, Options);
+			File.WriteAllText(FilePath, json);
+		}
+		public AppSettings ResetToDefault()
+		{
+			Directory.CreateDirectory(DataFolder);
+
+			string? templateJson = ReadEmbeddedTemplate();
+
+			if (templateJson != null)
+			{
+				File.WriteAllText(FilePath, templateJson);
+			}
+			else
+			{
+				SaveSettings(new AppSettings());
+			}
+
+			return LoadSettings();
+		}
+
+		private void SeedFromDefaultTemplate()
+		{
+			Directory.CreateDirectory(DataFolder);
+
+			string? templateJson = ReadEmbeddedTemplate();
+
+			if (templateJson != null)
+			{
+				File.WriteAllText(FilePath, templateJson);
+			}
+		}
+
+		private static string? ReadEmbeddedTemplate()
+		{
+			var assembly = Assembly.GetExecutingAssembly();
+			using var stream = assembly.GetManifestResourceStream(DefaultTemplateResourceName);
+
+			if (stream == null) return null;
+
+			using var reader = new StreamReader(stream);
+			return reader.ReadToEnd();
+		}
+	}
+}
+
+===== View\CustomFolders.xaml =====
+
+<Window x:Class="LaunchPad.View.CustomFolders"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Welcome to LaunchPad"
+        Width="480" Height="420"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize">
+	<Grid Margin="20">
+		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="*"/>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="Auto"/>
+		</Grid.RowDefinitions>
+
+		<TextBlock Grid.Row="0"
+                   Text="Would you like to add custom folders to scan for games?"
+                   FontSize="16" FontWeight="Bold" TextWrapping="Wrap" Margin="0,0,0,8"/>
+		<TextBlock Grid.Row="1"
+                   Text="LaunchPad already scans Steam, Epic, GOG, Ubisoft, EA and Battle.net automatically. Add extra folders below if you keep games elsewhere (e.g. portable or non-store games)."
+                   TextWrapping="Wrap" Opacity="0.8" Margin="0,0,0,12"/>
+
+		<ListBox x:Name="FoldersList" Grid.Row="2" Margin="0,0,0,8"/>
+
+		<StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,16">
+			<Button Content="Add folder..." Click="AddFolder_Click" Margin="0,0,8,0" Padding="10,4"/>
+			<Button Content="Remove selected" Click="RemoveFolder_Click" Padding="10,4"/>
+		</StackPanel>
+
+		<StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+			<Button Content="Skip" Click="Skip_Click" Margin="0,0,8,0" Padding="16,6"/>
+			<Button Content="Start scanning" Click="Continue_Click" Padding="16,6"/>
+		</StackPanel>
+	</Grid>
+</Window>
+
+
+===== View\CustomFolders.xaml.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Text;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Shapes;
+
+namespace LaunchPad.View
+{
+	public partial class CustomFolders : Window
+	{
+		public ObservableCollection<string> SelectedFolders { get; } = new();
+
+		public bool WantsScan { get; private set; }
+		public CustomFolders()
+		{
+			InitializeComponent();
+			FoldersList.ItemsSource = SelectedFolders;
+		}
+		private void AddFolder_Click(object sender, RoutedEventArgs e)
+		{
+			var dialog = new Microsoft.Win32.OpenFolderDialog
+			{
+				Title = "Select a folder to scan for games"
+			};
+
+			if (dialog.ShowDialog() == true && !SelectedFolders.Contains(dialog.FolderName))
+			{
+				SelectedFolders.Add(dialog.FolderName);
+			}
+		}
+
+		private void RemoveFolder_Click(object sender, RoutedEventArgs e)
+		{
+			if (FoldersList.SelectedItem is string selected)
+				SelectedFolders.Remove(selected);
+		}
+
+		private void Skip_Click(object sender, RoutedEventArgs e)
+		{
+			WantsScan = false;
+			DialogResult = true;
+		}
+
+		private void Continue_Click(object sender, RoutedEventArgs e)
+		{
+			WantsScan = true;
+			DialogResult = true;
+		}
+	}
+}
+
+
+===== View\HomeView.xaml =====
+
+<UserControl x:Class="LaunchPad.View.HomeView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:LaunchPad.View"
+             mc:Ignorable="d" 
+             d:DesignHeight="900" d:DesignWidth="1365">
+	<UserControl.Resources>
+		<Style x:Key="PlayButtonStyle" TargetType="Button">
+			<Setter Property="BorderThickness" Value="0"/>
+			<Setter Property="Width" Value="200"/>
+			<Setter Property="Height" Value="35"/>
+			<Setter Property="FontSize" Value="20"/>
+            <Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
+			<Setter Property="Background" Value="Transparent"/>
+			<Style.Triggers>
+				<Trigger Property="IsMouseOver" Value="True">
+					<Setter Property="Background" Value="Transparent"/>
+					<Setter Property="Template">
+						<Setter.Value>
+							<ControlTemplate TargetType="{x:Type Button}">
+								<Border Background="{TemplateBinding Background}">
+									<ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+								</Border>
+							</ControlTemplate>
+						</Setter.Value>
+					</Setter>
+				</Trigger>
+			</Style.Triggers>
+		</Style>
+		<Style x:Key="favoritblocks" TargetType="StackPanel">
+
+		</Style>
+		<DataTemplate x:Key="FavouriteCardTemplate">
+			<Border Margin="10 0 10 0" Padding="5" Width="230" CornerRadius="5" Background="{DynamicResource AppBackgroundSecondary}" BorderThickness="1" BorderBrush="{DynamicResource AppBorderColorSecondary}">
+				<StackPanel>
+					<Image Source="{Binding Icon}" RenderOptions.BitmapScalingMode="HighQuality" UseLayoutRounding="True"/>
+                    <Label Content="{Binding Name}" Foreground="{DynamicResource AppFontColorPrimary}" FontSize="14"/>
+                    <Label Content="{Binding LastPlayedLabel}" Foreground="{DynamicResource AppFontColorPrimary}" FontWeight="ExtraLight" FontSize="10"/>
+					<Border CornerRadius="5" Background="{DynamicResource AppBorderColorPrimary}">
+						<Button Style="{StaticResource PlayButtonStyle}">
+							<StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+								<TextBlock Text="" FontFamily="{StaticResource IconsFill}" VerticalAlignment="Center"/>
+								<TextBlock Text=" Play"/>
+							</StackPanel>
+						</Button>
+					</Border>
+				</StackPanel>
+			</Border>
+
+		</DataTemplate>
+	</UserControl.Resources>
+	<Grid Margin="20">
+		<Grid.RowDefinitions>
+			<RowDefinition Height="405 "/>
+			<RowDefinition Height="*"/>
+		</Grid.RowDefinitions>
+		<Border Background="{DynamicResource AppBackgroundPrimary}" CornerRadius="5">
+			<StackPanel>
+				<StackPanel.Resources>
+					<Style TargetType="Image">
+						<Setter Property="Stretch" Value="Fill"/>
+					</Style>
+				</StackPanel.Resources>
+				<Grid Margin="10">
+					<TextBlock Text=" Favourites" Foreground="{DynamicResource AppFontColorPrimary}" FontSize="22"/>
+					<TextBlock Text="View All" Foreground="{DynamicResource AppFontColorSecondary}" FontSize="14" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+				</Grid>
+				<ItemsControl ItemsSource="{Binding Favourites}" ItemTemplate="{StaticResource FavouriteCardTemplate}">
+					<ItemsControl.ItemsPanel>
+						<ItemsPanelTemplate>
+							<StackPanel Orientation="Horizontal"/>
+						</ItemsPanelTemplate>
+					</ItemsControl.ItemsPanel>
+				</ItemsControl>
+			</StackPanel>
+		</Border>
+        <StackPanel>
+			
+		</StackPanel>
+    </Grid>
+</UserControl>
+
+
+===== View\HomeView.xaml.cs =====
+
+using LaunchPad.Model;
+using LaunchPad.Services;
+using LaunchPad.ViewModel;
+using Microsoft.Extensions.DependencyInjection;
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+
+namespace LaunchPad.View
+{
+    /// <summary>
+    /// Interaction logic for HomeView.xaml
+    /// </summary>
+    public partial class HomeView : UserControl
+    {
+        public HomeView()
+        {
+            InitializeComponent();
+			DataContext = App.ServiceProvider.GetRequiredService<HomeViewModel>();
+		}
+        private void TestThemeSwap_Click(object sender, RoutedEventArgs e)
+        {
+            var settingsService = App.ServiceProvider.GetRequiredService<SettingsService>();
+
+            var testSettings = new AppSettings
+            {
+                FontFamily = "Consolas",
+                FontColorPrimary = "#00FF00",
+                FontColorSecondary = "#FF9900",
+                MenuBackgroundPrimary = "#330000",
+                MenuBackgroundSecondary = "#440000",
+                BackgroundPrimary = "#000033",
+                BackgroundSecondary = "#000044",
+                TitlebarBackground = "#660000",
+                SelectedMenuItemBackground = "#40FF9900"
+            };
+
+            settingsService.Apply(testSettings);
+        }
+        private void TestThemeSwap_Clickback(object sender, RoutedEventArgs e)
+        {
+            var settingsService = App.ServiceProvider.GetRequiredService<SettingsService>();
+
+            var testSettings = new AppSettings
+            {
+                FontFamily = "Segoe UI",
+                FontColorPrimary = "#CCCCCC",
+                FontColorSecondary = "#8A6BE2",
+                MenuBackgroundPrimary = "#111119",
+                MenuBackgroundSecondary = "#15151C",
+                BackgroundPrimary = "#1F1F1F",
+                BackgroundSecondary = "#1A1A1A",
+                TitlebarBackground = "#444444",
+                SelectedMenuItemBackground = "#408A2BE2"
+            };
+
+            settingsService.Apply(testSettings);
+        }
+    }
+}
+
+
+===== View\LeftMenu.xaml =====
+
+<UserControl x:Class="LaunchPad.View.LeftMenu"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:LaunchPad.View"
+			 xmlns:vm ="clr-namespace:LaunchPad.ViewModel"
+             mc:Ignorable="d" 
+             d:DesignHeight="900" d:DesignWidth="235">
+
+	<UserControl.Resources>
+		<Style TargetType="RadioButton">
+			<Setter Property="FontSize" Value="20"/>
+			<Setter Property="Margin" Value="20 10 20 0"/>
+            <Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="RadioButton">
+						<Border x:Name="BorderBg" Background="Transparent" CornerRadius="10">
+							<ContentPresenter Margin="10 10"/>
+						</Border>
+						<ControlTemplate.Triggers>
+							<Trigger Property="IsChecked" Value="True">
+								<Setter TargetName="BorderBg" Property="Background" Value="{DynamicResource AppSelectedMenuItemBackground}"/>
+							</Trigger>
+						</ControlTemplate.Triggers>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+		<Style x:Key="Icons" TargetType="Run">
+			<Setter Property="FontFamily" Value="{StaticResource IconsDef}"/>
+			<Style.Triggers>
+				<DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=RadioButton}}" Value="True">
+					<Setter Property="FontFamily" Value="{StaticResource IconsFill}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource AppFontColorSecondary}"/>
+				</DataTrigger>
+			</Style.Triggers>
+		</Style>
+		<Style x:Key="QuickLabel" TargetType="Label">
+            <Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
+			<Setter Property="FontSize" Value="12"/>
+		</Style>
+		<Style TargetType="WrapPanel">
+			<Setter Property="Margin" Value="0 15 0 0"/>
+		</Style>
+		<Style x:Key="QImgB" TargetType="Border">
+			<Setter Property="CornerRadius" Value="5"/>
+			<Setter Property="Margin" Value="10 0 5 0"/>
+			<Setter Property="Width" Value="30"/>
+			<Setter Property="Height" Value="30"/>
+		</Style>
+	</UserControl.Resources>
+    <Grid Background="{DynamicResource AppMenuBackgroundPrimary}">
+		<Grid.RowDefinitions>
+			<RowDefinition Height="100*" MaxHeight="330"/>
+			<RowDefinition Height="100*" MaxHeight="330"/>
+			<RowDefinition Height="*" MinHeight="150"/>
+			<RowDefinition Height="20"/>
+		</Grid.RowDefinitions>
+        <Rectangle Width="auto" Height="1px" Fill="{DynamicResource AppFontColorPrimary}" VerticalAlignment="Top" Opacity="0.1"/>
+		<ScrollViewer VerticalScrollBarVisibility="Hidden" >
+			<StackPanel >
+				<RadioButton x:Name="RBHome" GroupName="Menu" IsChecked="{Binding IsHomeSelected, Mode=TwoWay}">
+					<TextBlock> <Run Style="{StaticResource Icons}"></Run> <Run></Run> Home</TextBlock>
+				</RadioButton>
+				<RadioButton x:Name="RBLibrary" GroupName="Menu" IsChecked="{Binding IsLibrarySelected, Mode=TwoWay}">
+					<TextBlock> <Run Style="{StaticResource Icons}"></Run> <Run></Run> Library</TextBlock>
+				</RadioButton>
+				<RadioButton x:Name="RBStatistics" GroupName="Menu" IsChecked="{Binding IsStatisticsSelected, Mode=TwoWay}">
+					<TextBlock> <Run Style="{StaticResource Icons}"></Run> <Run></Run> Statistics</TextBlock>
+				</RadioButton>
+				<RadioButton x:Name="RBMacros" GroupName="Menu" IsChecked="{Binding IsMacrosSelected, Mode=TwoWay}">
+					<TextBlock> <Run Style="{StaticResource Icons}"></Run> <Run></Run> Macros</TextBlock>
+				</RadioButton>
+				<RadioButton x:Name="RBSettings" GroupName="Menu" IsChecked="{Binding IsSettingsSelected, Mode=TwoWay}">
+					<TextBlock> <Run Style="{StaticResource Icons}"></Run> <Run></Run> Settings</TextBlock>
+				</RadioButton>
+			</StackPanel>
+		</ScrollViewer>
+
+		<Border Grid.Row="1" Background="{DynamicResource AppMenuBackgroundSecondary}" Margin="10 10 10 10" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource AppBorderColorSecondary}">
+			<Grid>
+				<Grid.RowDefinitions>
+					<RowDefinition Height="auto"/>
+					<RowDefinition Height="1*"/>
+				</Grid.RowDefinitions>
+                <TextBlock Text="Quick Launch" Foreground="{DynamicResource AppFontColorPrimary}" Margin="10 10 10 0" FontSize="14"/>
+				<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Hidden">
+					<StackPanel>
+						<WrapPanel>
+							<Border Style="{StaticResource QImgB}">
+								<Image Source="/Resources/Images/Lp_Ikon.png"/>
+							</Border>
+							<Label Style="{StaticResource QuickLabel}" Content="1 Ring"/>
+						</WrapPanel>
+						<WrapPanel>
+							<Border Style="{StaticResource QImgB}">
+								<Image Source="/Resources/Images/Lp_Ikon.png"/>
+							</Border>
+							<Label Style="{StaticResource QuickLabel}" Content="2 Ring"/>
+						</WrapPanel>
+						<WrapPanel>
+							<Border Style="{StaticResource QImgB}">
+								<Image Source="/Resources/Images/Lp_Ikon.png"/>
+							</Border>
+							<Label Style="{StaticResource QuickLabel}" Content="3 Ring"/>
+						</WrapPanel>
+						<WrapPanel>
+							<Border Style="{StaticResource QImgB}">
+								<Image Source="/Resources/Images/Lp_Ikon.png"/>
+							</Border>
+							<Label Style="{StaticResource QuickLabel}" Content="4 Ring"/>
+						</WrapPanel>
+						<WrapPanel>
+							<Border Style="{StaticResource QImgB}">
+								<Image Source="/Resources/Images/Lp_Ikon.png"/>
+							</Border>
+							<Label Style="{StaticResource QuickLabel}" Content="5 Ring"/>
+						</WrapPanel>
+						<WrapPanel>
+							<Border Style="{StaticResource QImgB}">
+								<Image Source="/Resources/Images/Lp_Ikon.png"/>
+							</Border>
+							<Label Style="{StaticResource QuickLabel}" Content="6 Ring"/>
+						</WrapPanel>
+					</StackPanel>
+				</ScrollViewer>
+			</Grid>
+		</Border>
+		<Border Grid.Row="2" VerticalAlignment="Bottom"  Background="{DynamicResource AppMenuBackgroundSecondary}" Margin="10 10 10 10" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource AppBorderColorSecondary}">
+			<Grid>
+				<Grid.RowDefinitions>
+					<RowDefinition Height="40"/>
+					<RowDefinition Height="60"/>
+				</Grid.RowDefinitions>
+				<WrapPanel Margin="10 10 10 10">
+					<TextBlock Text="" FontFamily="{StaticResource IconsFill}" Foreground="LimeGreen" FontSize="6" VerticalAlignment="Center"/>
+                    <TextBlock Text="Now Playing" Foreground="{DynamicResource AppFontColorPrimary}" Margin="3 0 0 0"/>
+				</WrapPanel>
+				<WrapPanel Grid.Row="1" Margin="0 0 0 15">
+					<Border Style="{StaticResource QImgB}" Margin="10 5 5 0">
+						<Image Source="/Resources/Images/Lp_Ikon.png"/>
+					</Border>
+					<StackPanel>
+						<Label Style="{StaticResource QuickLabel}" Content="Elden Ring"/>
+						<WrapPanel Margin="0 -10 0 0">
+                            <Label Foreground="{DynamicResource AppFontColorPrimary}" FontWeight="ExtraLight" FontSize="10" Content="Playing for:"/>
+                            <Label Foreground="{DynamicResource AppFontColorPrimary}" FontWeight="ExtraLight" FontSize="10" Margin="-5 0 0 0" Content="45m"/>
+						</WrapPanel>
+					</StackPanel>
+				</WrapPanel>
+			</Grid>
+		</Border>
+	</Grid>
+</UserControl>
+
+
+===== View\LeftMenu.xaml.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+
+namespace LaunchPad.View
+{
+    /// <summary>
+    /// Interaction logic for LeftMenu.xaml
+    /// </summary>
+    public partial class LeftMenu : UserControl
+    {
+        public LeftMenu()
+        {
+            InitializeComponent();
+        }
+    }
+}
+
+
+===== View\Library.xaml =====
+
+<UserControl x:Class="LaunchPad.View.Library"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:LaunchPad.View"
+             xmlns:helpers="clr-namespace:LaunchPad.Helpers"
+             mc:Ignorable="d" 
+             d:DesignHeight="450" d:DesignWidth="800">
+	<UserControl.Resources>
+		<Style TargetType="TextBlock">
+			<Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
+		</Style>
+		<!-- Tab-os fókusz pontozott kerete -->
+		<Style x:Key="FocusVisual">
+			<Setter Property="Control.Template">
+				<Setter.Value>
+					<ControlTemplate>
+						<Rectangle Margin="2" StrokeDashArray="1 2"
+                               Stroke="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"
+                               SnapsToDevicePixels="true" StrokeThickness="1"/>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+
+		<!-- A zárt doboz teste + nyíl -->
+		<Style x:Key="ComboBoxToggleButton" TargetType="{x:Type ToggleButton}">
+			<Setter Property="OverridesDefaultStyle" Value="true"/>
+			<Setter Property="IsTabStop" Value="false"/>
+			<Setter Property="Focusable" Value="false"/>
+			<Setter Property="ClickMode" Value="Press"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="{x:Type ToggleButton}">
+						<Border x:Name="templateRoot"
+                            CornerRadius="5"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            SnapsToDevicePixels="true">
+							<Border x:Name="splitBorder"
+                                BorderBrush="Transparent" BorderThickness="1"
+                                HorizontalAlignment="Right" Margin="0"
+                                SnapsToDevicePixels="true"
+                                Width="{DynamicResource {x:Static SystemParameters.VerticalScrollBarWidthKey}}">
+								<Path x:Name="arrow"
+                                  Data="F1 M 0,0 L 2.667,2.66665 L 5.3334,0 L 5.3334,-1.78168 L 2.6667,0.88501 L0,-1.78168 L0,0 Z"
+                                  Fill="{TemplateBinding Foreground}"
+                                  HorizontalAlignment="Center" Margin="0" VerticalAlignment="Center"/>
+							</Border>
+						</Border>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+
+		<!-- A ComboBox felépítése -->
+		<ControlTemplate x:Key="ComboBoxTemplate" TargetType="{x:Type ComboBox}">
+			<Grid x:Name="templateRoot" SnapsToDevicePixels="true">
+				<Grid.ColumnDefinitions>
+					<ColumnDefinition Width="*"/>
+					<ColumnDefinition MinWidth="{DynamicResource {x:Static SystemParameters.VerticalScrollBarWidthKey}}" Width="0"/>
+				</Grid.ColumnDefinitions>
+
+				<!-- A lenyíló lista -->
+				<Popup x:Name="PART_Popup"
+                   AllowsTransparency="true"
+                   Grid.ColumnSpan="2"
+                   IsOpen="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource Mode=TemplatedParent}}"
+                   Margin="1"
+                   Placement="Bottom"
+                   PopupAnimation="{DynamicResource {x:Static SystemParameters.ComboBoxPopupAnimationKey}}">
+					<Border x:Name="dropDownBorder"
+                        MinWidth="{Binding ActualWidth, ElementName=templateRoot}"
+                        MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                        Background="{DynamicResource AppMenuBackgroundSecondary}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="1">
+						<ScrollViewer x:Name="DropDownScrollViewer">
+							<Grid x:Name="grid" RenderOptions.ClearTypeHint="Enabled">
+								<Canvas x:Name="canvas" HorizontalAlignment="Left" Height="0" VerticalAlignment="Top" Width="0">
+									<Rectangle x:Name="opaqueRect"
+                                           Fill="{Binding Background, ElementName=dropDownBorder}"
+                                           Height="{Binding ActualHeight, ElementName=dropDownBorder}"
+                                           Width="{Binding ActualWidth, ElementName=dropDownBorder}"/>
+								</Canvas>
+								<ItemsPresenter x:Name="ItemsPresenter"
+                                            KeyboardNavigation.DirectionalNavigation="Contained"
+                                            SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+							</Grid>
+						</ScrollViewer>
+					</Border>
+				</Popup>
+
+				<!-- A doboz teste (nyitás/zárás) -->
+				<ToggleButton x:Name="toggleButton"
+                          Background="{TemplateBinding Background}"
+                          BorderBrush="{TemplateBinding BorderBrush}"
+                          BorderThickness="{TemplateBinding BorderThickness}"
+                          Grid.ColumnSpan="2"
+                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource Mode=TemplatedParent}}"
+                          Style="{StaticResource ComboBoxToggleButton}"/>
+
+				<!-- A kiválasztott elem szövege -->
+				<ContentPresenter x:Name="contentPresenter"
+                              ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                              Content="{TemplateBinding SelectionBoxItem}"
+                              ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              IsHitTestVisible="false"
+                              Margin="{TemplateBinding Padding}"
+                              SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"
+                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+			</Grid>
+			<ControlTemplate.Triggers>
+				<Trigger Property="HasItems" Value="false">
+					<Setter TargetName="dropDownBorder" Property="Height" Value="95"/>
+				</Trigger>
+				<MultiTrigger>
+					<MultiTrigger.Conditions>
+						<Condition Property="IsGrouping" Value="true"/>
+						<Condition Property="VirtualizingPanel.IsVirtualizingWhenGrouping" Value="false"/>
+					</MultiTrigger.Conditions>
+					<Setter Property="ScrollViewer.CanContentScroll" Value="false"/>
+				</MultiTrigger>
+				<Trigger SourceName="DropDownScrollViewer" Property="ScrollViewer.CanContentScroll" Value="false">
+					<Setter TargetName="opaqueRect" Property="Canvas.Top" Value="{Binding VerticalOffset, ElementName=DropDownScrollViewer}"/>
+					<Setter TargetName="opaqueRect" Property="Canvas.Left" Value="{Binding HorizontalOffset, ElementName=DropDownScrollViewer}"/>
+				</Trigger>
+			</ControlTemplate.Triggers>
+		</ControlTemplate>
+
+		<!-- Alapértékek, ezt adod a ComboBoxnak -->
+		<Style x:Key="ComboBoxStyle1" TargetType="{x:Type ComboBox}">
+			<Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}"/>
+			<Setter Property="Background" Value="{DynamicResource AppTitlebarBackground}"/>
+			<Setter Property="BorderBrush" Value="{DynamicResource AppFontColorSecondary}"/>
+			<Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
+			<Setter Property="BorderThickness" Value="1"/>
+			<Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto"/>
+			<Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
+			<Setter Property="Padding" Value="6,3,5,3"/>
+			<Setter Property="ScrollViewer.CanContentScroll" Value="true"/>
+			<Setter Property="ScrollViewer.PanningMode" Value="Both"/>
+			<Setter Property="Stylus.IsFlicksEnabled" Value="False"/>
+			<Setter Property="Template" Value="{StaticResource ComboBoxTemplate}"/>
+		</Style>
+
+		<!-- Kapcsoló stílusú CheckBox (az "All" kapcsolókhoz) -->
+		<Style x:Key="SwitchCheckBoxStyle" TargetType="CheckBox">
+			<Setter Property="OverridesDefaultStyle" Value="True"/>
+			<Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+			<Setter Property="Cursor" Value="Hand"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="CheckBox">
+						<Grid Background="Transparent" Height="30">
+							<Grid.ColumnDefinitions>
+								<ColumnDefinition Width="*"/>
+								<ColumnDefinition Width="Auto"/>
+							</Grid.ColumnDefinitions>
+
+							<TextBlock Text="{TemplateBinding Content}"
+									   Foreground="{DynamicResource AppFontColorPrimary}"
+									   FontSize="13"
+									   VerticalAlignment="Center"/>
+
+							<Border x:Name="Track"
+									Grid.Column="1"
+									Width="34" Height="18"
+									CornerRadius="9"
+									Background="{DynamicResource AppBackgroundPrimary}"
+									BorderBrush="{DynamicResource AppTitlebarBackground}"
+									BorderThickness="1">
+								<Ellipse x:Name="Thumb"
+										 Width="12" Height="12"
+										 Margin="3,0,0,0"
+										 HorizontalAlignment="Left"
+										 Fill="{DynamicResource AppFontColorPrimary}">
+									<Ellipse.RenderTransform>
+										<TranslateTransform x:Name="ThumbTransform" X="0"/>
+									</Ellipse.RenderTransform>
+								</Ellipse>
+							</Border>
+						</Grid>
+
+						<ControlTemplate.Triggers>
+							<Trigger Property="IsMouseOver" Value="True">
+								<Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AppFontColorSecondary}"/>
+							</Trigger>
+							<Trigger Property="IsChecked" Value="True">
+								<Setter TargetName="Track" Property="Background" Value="{DynamicResource AppFontColorSecondary}"/>
+								<Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AppFontColorSecondary}"/>
+								<Setter TargetName="Thumb" Property="Fill" Value="White"/>
+								<Trigger.EnterActions>
+									<BeginStoryboard>
+										<Storyboard>
+											<DoubleAnimation Storyboard.TargetName="ThumbTransform"
+															 Storyboard.TargetProperty="X"
+															 To="14" Duration="0:0:0.15"/>
+										</Storyboard>
+									</BeginStoryboard>
+								</Trigger.EnterActions>
+								<Trigger.ExitActions>
+									<BeginStoryboard>
+										<Storyboard>
+											<DoubleAnimation Storyboard.TargetName="ThumbTransform"
+															 Storyboard.TargetProperty="X"
+															 To="0" Duration="0:0:0.15"/>
+										</Storyboard>
+									</BeginStoryboard>
+								</Trigger.ExitActions>
+							</Trigger>
+						</ControlTemplate.Triggers>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+
+		<!-- Chip (pill) stílusú CheckBox -->
+		<Style x:Key="ChipCheckBoxStyle" TargetType="CheckBox">
+			<Setter Property="OverridesDefaultStyle" Value="True"/>
+			<Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+			<Setter Property="Cursor" Value="Hand"/>
+			<Setter Property="Margin" Value="0,0,6,6"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="CheckBox">
+						<Border x:Name="Chip"
+								CornerRadius="12"
+								Padding="11,4"
+								Background="{DynamicResource AppBackgroundPrimary}"
+								BorderBrush="{DynamicResource AppTitlebarBackground}"
+								BorderThickness="1">
+							<TextBlock x:Name="Label"
+									   Text="{TemplateBinding Content}"
+									   FontSize="12"
+									   Foreground="{DynamicResource AppFontColorPrimary}"/>
+						</Border>
+						<ControlTemplate.Triggers>
+							<Trigger Property="IsMouseOver" Value="True">
+								<Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource AppFontColorSecondary}"/>
+							</Trigger>
+							<Trigger Property="IsChecked" Value="True">
+								<Setter TargetName="Chip" Property="Background" Value="{DynamicResource AppSelectedMenuItemBackground}"/>
+								<Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource AppFontColorSecondary}"/>
+								<Setter TargetName="Label" Property="Foreground" Value="{DynamicResource AppFontColorSecondary}"/>
+							</Trigger>
+						</ControlTemplate.Triggers>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+
+		<Style x:Key="XButtonStyle" TargetType="Button">
+			<!-- Segoe MDL2 Assets / Fluent Icons: E711 = Cancel (X) -->
+			<Setter Property="Content" Value="&#xE711;"/>
+			<Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+			<Setter Property="BorderThickness" Value="0"/>
+			<Setter Property="Width" Value="20"/>
+			<Setter Property="Height" Value="20"/>
+			<Setter Property="FontSize" Value="8"/>
+			<Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
+			<Setter Property="Background" Value="Transparent"/>
+			<Style.Triggers>
+				<Trigger Property="IsMouseOver" Value="True">
+					<Setter Property="Background" Value="Transparent"/>
+					<Setter Property="Template">
+						<Setter.Value>
+							<ControlTemplate TargetType="{x:Type Button}">
+								<Border Background="{TemplateBinding Background}">
+									<ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+								</Border>
+							</ControlTemplate>
+						</Setter.Value>
+					</Setter>
+				</Trigger>
+				<Trigger Property="IsMouseCaptured" Value="True">
+					<Setter Property="Foreground" Value="{DynamicResource AppMenuBackgroundPrimary}"/>
+				</Trigger>
+			</Style.Triggers>
+		</Style>
+        <DataTemplate x:Key="GameCardTemplate">
+			<Border>
+
+			</Border>
+		</DataTemplate>
+	</UserControl.Resources>
+	<Grid>
+		<Grid.RowDefinitions>
+			<RowDefinition Height="30"/>
+			<RowDefinition Height="50"/>
+			<RowDefinition Height="*"/>
+		</Grid.RowDefinitions>
+		<Grid Width="530" HorizontalAlignment="Right" Grid.Row="1">
+			<Grid.RowDefinitions>
+				<RowDefinition Height="20"/>
+				<RowDefinition Height="30"/>
+			</Grid.RowDefinitions>
+			<Grid.ColumnDefinitions>
+				<ColumnDefinition Width="250"/>
+				<ColumnDefinition Width="10"/>
+				<ColumnDefinition Width="150"/>
+				<ColumnDefinition Width="20"/>
+				<ColumnDefinition Width="10"/>
+				<ColumnDefinition Width="50"/>
+				<ColumnDefinition Width="30"/>
+			</Grid.ColumnDefinitions>
+			<TextBlock Grid.Column="0" Grid.Row="0">
+                <Run Text="Total games: "/>
+                <Run Text="{Binding Games.Count, Mode=OneWay}"/>
+			</TextBlock>
+			<TextBlock Text="Sort by:" Grid.Column="2" Grid.Row="0"/>
+			<TextBlock Text="Filter:" Grid.Column="5" Grid.Row="0"/>
+			<Border				
+                CornerRadius="5"
+                Background="{DynamicResource AppTitlebarBackground}"
+                BorderBrush="{DynamicResource AppFontColorSecondary}"
+                BorderThickness="1"
+                Grid.Column="0" 
+                Grid.Row="1"
+                ClipToBounds="True">
+				<StackPanel Orientation="Horizontal">
+					<TextBox 
+                         Name="SearchBar"
+                         Margin="3 0 0 0"
+                         helpers:TextBoxHelper.Placeholder="Search..."
+                         Foreground="{DynamicResource AppFontColorPrimary}" 
+                         Background="Transparent"
+                         VerticalContentAlignment="Center" 
+                         BorderThickness="0" 
+                         FontSize="16"
+                         Width="225"/>
+					<Button
+                        Style="{StaticResource XButtonStyle}"
+                        Click="Button_Click"/>
+				</StackPanel>
+			</Border>
+			<!-- FIGYELEM: ide told vissza az eredeti ikon karaktered (IconsDef font) -->
+			<TextBlock Text="&#xE8CB;" FontFamily="{StaticResource IconsDef}" FontSize="20" Grid.Column="3" Grid.Row="1"/>
+			<ComboBox Style="{StaticResource ComboBoxStyle1}" SelectedIndex="0" FontSize="16" Grid.Column="2" Grid.Row="1">
+				<ComboBoxItem Content="Alphabetical" />
+				<ComboBoxItem Content="Total Playtime"/>
+				<ComboBoxItem Content="Recently Played"/>
+			</ComboBox>
+			<!--<ComboBox Style="{StaticResource ComboBoxStyle1}" Grid.Column="5" Grid.Row="1"/>-->
+			<StackPanel HorizontalAlignment="Left" Grid.Column="5" Grid.Row="1">
+
+				<!-- A szűrő gomb -->
+				<ToggleButton x:Name="FilterButton" ToolTip="Filter">
+					<ToggleButton.Style>
+						<Style TargetType="ToggleButton">
+							<Setter Property="OverridesDefaultStyle" Value="True"/>
+							<Setter Property="Width" Value="30"/>
+							<Setter Property="Height" Value="30"/>
+							<Setter Property="Cursor" Value="Hand"/>
+							<Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
+							<Setter Property="Template">
+								<Setter.Value>
+									<ControlTemplate TargetType="ToggleButton">
+										<Grid>
+											<!-- Alap: ugyanaz, mint a keresősáv / ComboBox -->
+											<Border x:Name="Bd"
+													CornerRadius="5"
+													Background="{DynamicResource AppTitlebarBackground}"
+													BorderBrush="{DynamicResource AppFontColorSecondary}"
+													BorderThickness="1"/>
+
+											<!-- Hover / checked réteg -->
+											<Border x:Name="Overlay"
+													CornerRadius="5"
+													Background="{DynamicResource AppSelectedMenuItemBackground}"
+													Opacity="0"/>
+
+											<!-- Tölcsér ikon -->
+											<Path x:Name="Icon"
+												  Data="M1,2 H15 L10,8.5 V14 L6,12 V8.5 Z"
+												  Stroke="{TemplateBinding Foreground}"
+												  StrokeThickness="1.5"
+												  StrokeLineJoin="Round"
+												  Width="16" Height="16"
+												  Stretch="None"
+												  HorizontalAlignment="Center"
+												  VerticalAlignment="Center"/>
+										</Grid>
+										<ControlTemplate.Triggers>
+											<Trigger Property="IsMouseOver" Value="True">
+												<Setter TargetName="Overlay" Property="Opacity" Value="0.6"/>
+											</Trigger>
+											<Trigger Property="IsChecked" Value="True">
+												<Setter TargetName="Overlay" Property="Opacity" Value="1"/>
+												<Setter TargetName="Icon" Property="Stroke" Value="{DynamicResource AppFontColorSecondary}"/>
+											</Trigger>
+										</ControlTemplate.Triggers>
+									</ControlTemplate>
+								</Setter.Value>
+							</Setter>
+
+							<Style.Triggers>
+								<DataTrigger Binding="{Binding IsOpen, ElementName=FilterPopup}" Value="True">
+									<Setter Property="IsHitTestVisible" Value="False"/>
+								</DataTrigger>
+							</Style.Triggers>
+						</Style>
+					</ToggleButton.Style>
+				</ToggleButton>
+
+				<!-- A lenyíló panel -->
+				<Popup x:Name="FilterPopup"
+					   PlacementTarget="{Binding ElementName=FilterButton}"
+					   Placement="Bottom"
+					   HorizontalOffset="-208"
+					   VerticalOffset="-4"
+					   StaysOpen="False"
+					   AllowsTransparency="True"
+					   PopupAnimation="Fade"
+					   IsOpen="{Binding IsChecked, ElementName=FilterButton, Mode=TwoWay}">
+
+					<Border Margin="8"
+							Width="230"
+							CornerRadius="8"
+							Background="{DynamicResource AppMenuBackgroundSecondary}"
+							BorderBrush="{DynamicResource AppFontColorSecondary}"
+							BorderThickness="1"
+							Padding="14,12">
+						<Border.Effect>
+							<DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.5" Color="Black"/>
+						</Border.Effect>
+
+						<StackPanel>
+
+							<!-- ===== SHOW ===== -->
+							<TextBlock Text="SHOW"
+									   FontSize="11"
+									   FontWeight="SemiBold"
+									   Opacity="0.55"
+									   Margin="0,0,0,2"/>
+
+							<CheckBox Content="All"
+									  FontWeight="SemiBold"
+									  Style="{StaticResource SwitchCheckBoxStyle}"
+									  IsChecked="{Binding ShowFilter.IsAll}"/>
+
+							<ItemsControl ItemsSource="{Binding ShowFilter.Options}" Margin="0,6,0,0">
+								<ItemsControl.ItemsPanel>
+									<ItemsPanelTemplate>
+										<WrapPanel/>
+									</ItemsPanelTemplate>
+								</ItemsControl.ItemsPanel>
+								<ItemsControl.ItemTemplate>
+									<DataTemplate>
+										<CheckBox Content="{Binding Name}"
+												  IsChecked="{Binding IsChecked}"
+												  Style="{StaticResource ChipCheckBoxStyle}"/>
+									</DataTemplate>
+								</ItemsControl.ItemTemplate>
+							</ItemsControl>
+
+							<Border Height="1"
+									Background="{DynamicResource AppTitlebarBackground}"
+									Margin="0,4,0,10"/>
+
+							<!-- ===== SOURCE ===== -->
+							<TextBlock Text="SOURCE"
+									   FontSize="11"
+									   FontWeight="SemiBold"
+									   Opacity="0.55"
+									   Margin="0,0,0,2"/>
+
+							<CheckBox Content="All"
+									  FontWeight="SemiBold"
+									  Style="{StaticResource SwitchCheckBoxStyle}"
+									  IsChecked="{Binding SourceFilter.IsAll}"/>
+
+							<ItemsControl ItemsSource="{Binding SourceFilter.Options}" Margin="0,6,0,0">
+								<ItemsControl.ItemsPanel>
+									<ItemsPanelTemplate>
+										<WrapPanel/>
+									</ItemsPanelTemplate>
+								</ItemsControl.ItemsPanel>
+								<ItemsControl.ItemTemplate>
+									<DataTemplate>
+										<CheckBox Content="{Binding Name}"
+												  IsChecked="{Binding IsChecked}"
+												  Style="{StaticResource ChipCheckBoxStyle}"/>
+									</DataTemplate>
+								</ItemsControl.ItemTemplate>
+							</ItemsControl>
+
+						</StackPanel>
+					</Border>
+				</Popup>
+
+			</StackPanel>
+		</Grid>
+        <!--<ItemsControl ItemsSource="{Binding Games}" ItemTemplate="{StaticResource GameCardTemplate}">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <ScrollViewer>
+						<StackPanel/>
+                        
+                    </ScrollViewer>
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            
+        </ItemsControl>-->
+	</Grid>
+</UserControl>
+
+===== View\Library.xaml.cs =====
+
+using LaunchPad.ViewModel;
+using Microsoft.Extensions.DependencyInjection;
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+
+namespace LaunchPad.View
+{
+    /// <summary>
+    /// Interaction logic for Library.xaml
+    /// </summary>
+    public partial class Library : UserControl
+    {
+        public Library()
+        {
+            InitializeComponent();
+            DataContext = App.ServiceProvider.GetRequiredService<LibraryViewModel>();
+        }
+
+		private void Button_Click(object sender, RoutedEventArgs e)
+		{
+			this.SearchBar.Text = string.Empty;
+		}
+	}
+}
+
+
+===== View\Macros.xaml =====
+
+<UserControl x:Class="LaunchPad.View.Macros"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:LaunchPad.View"
+             mc:Ignorable="d" 
+             d:DesignHeight="450" d:DesignWidth="800">
+    <Grid>
+		<Rectangle Fill="Green"/>
+	</Grid>
+</UserControl>
+
+
+===== View\Macros.xaml.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+
+namespace LaunchPad.View
+{
+    /// <summary>
+    /// Interaction logic for Macros.xaml
+    /// </summary>
+    public partial class Macros : UserControl
+    {
+        public Macros()
+        {
+            InitializeComponent();
+        }
+    }
+}
+
+
+===== View\ScanProgressWindow.xaml =====
+
+<Window x:Class="LaunchPad.View.ScanProgressWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Scanning for games..."
+        Width="420" Height="140"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        WindowStyle="ToolWindow">
+	<Grid Margin="20">
+		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="Auto"/>
+		</Grid.RowDefinitions>
+
+		<TextBlock x:Name="StatusText" Grid.Row="0" Text="Starting scan..."
+                   TextWrapping="Wrap" Margin="0,0,0,12"/>
+		<ProgressBar x:Name="ScanProgressBar" Grid.Row="1" IsIndeterminate="True" Height="18"/>
+	</Grid>
+</Window>
+
+===== View\ScanProgressWindow.xaml.cs =====
+
+using System;
+using System.Windows;
+
+namespace LaunchPad.View
+{
+	public partial class ScanProgressWindow : Window, IProgress<string>
+	{
+		public ScanProgressWindow()
+		{
+			InitializeComponent();
+		}
+
+		public void Report(string value)
+		{
+			Dispatcher.Invoke(() => StatusText.Text = value);
+		}
+	}
+}
+
+===== View\Settings.xaml =====
+
+<UserControl x:Class="LaunchPad.View.Settings"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:LaunchPad.View"
+             mc:Ignorable="d" 
+             d:DesignHeight="450" d:DesignWidth="800">
+    <Grid>
+		<Rectangle Fill="Beige"/>
+	</Grid>
+</UserControl>
+
+
+===== View\Settings.xaml.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+
+namespace LaunchPad.View
+{
+    /// <summary>
+    /// Interaction logic for Settings.xaml
+    /// </summary>
+    public partial class Settings : UserControl
+    {
+        public Settings()
+        {
+            InitializeComponent();
+        }
+    }
+}
+
+
+===== View\Statistics.xaml =====
+
+<UserControl x:Class="LaunchPad.View.Statistics"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:LaunchPad.View"
+             mc:Ignorable="d" 
+             d:DesignHeight="450" d:DesignWidth="800">
+    <Grid>
+		<Rectangle Fill="Orange"/>
+	</Grid>
+</UserControl>
+
+
+===== View\Statistics.xaml.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+
+namespace LaunchPad.View
+{
+    /// <summary>
+    /// Interaction logic for Statistics.xaml
+    /// </summary>
+    public partial class Statistics : UserControl
+    {
+        public Statistics()
+        {
+            InitializeComponent();
+        }
+    }
+}
+
+
+===== View\TitleBar.xaml =====
+
+<UserControl x:Class="LaunchPad.View.TitleBar"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:LaunchPad.View"
+			 xmlns:vm ="clr-namespace:LaunchPad.ViewModel"
+             mc:Ignorable="d" 
+             d:DesignHeight="45" d:DesignWidth="1920">
+	<UserControl.DataContext>
+		<vm:TitlebarVM/>
+	</UserControl.DataContext>
+	<UserControl.Resources>
+        <Style x:Key="BaseButtonStyle" TargetType="Button">
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+			<Setter Property="Width" Value="45"/>
+            <Setter Property="Height" Value="45"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="Foreground" Value="{DynamicResource AppFontColorPrimary}"/>
+            <Setter Property="Background" Value="Transparent"/>
+			<Setter Property="VerticalAlignment" Value="Top"/>
+			<Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AppTitlebarBackground}"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="{x:Type Button}">
+                                <Border Background="{TemplateBinding Background}">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+		<Style x:Key="NoHoverButtonStyle" BasedOn="{StaticResource BaseButtonStyle}" TargetType="Button">
+			<Style.Triggers>
+				<Trigger Property="IsMouseOver" Value="True">
+					<Setter Property="Background" Value="Transparent"/>
+				</Trigger>
+			</Style.Triggers>
+		</Style>
+
+	</UserControl.Resources>
+    <Grid Background="{DynamicResource AppMenuBackgroundPrimary}">
+		<Grid.ColumnDefinitions>
+			<ColumnDefinition Width="20"/>
+			<ColumnDefinition Width="40"/>
+			<ColumnDefinition Width="5"/>
+			<ColumnDefinition Width="170"/>
+			<ColumnDefinition
+				Width="1*"/>
+			<ColumnDefinition 
+				Width="45"/>
+			<ColumnDefinition 
+				Width="45"/>
+			<ColumnDefinition 
+				Width="45"/>
+		</Grid.ColumnDefinitions>
+
+		<Rectangle
+			Grid.Column="0"
+			Grid.ColumnSpan="4"
+			Fill="{DynamicResource AppMenuBackgroundPrimary}"/>
+
+		<Button
+			Style="{StaticResource NoHoverButtonStyle}"
+			Width="auto"
+			Height="45"
+			Panel.ZIndex="1"
+			PreviewMouseLeftButtonDown="Window_MouseLeftButtonDown"
+			PreviewMouseMove="Window_MouseMove"
+			MouseDoubleClick="TitleBar_MouseDoubleClick"
+			PreviewMouseLeftButtonUp="Window_MouseLeftButtonUp"
+			VerticalAlignment="Top"
+			Margin="0 0 0 0"
+			Grid.ColumnSpan="8"/>
+
+		<Image
+			Margin="0 5 0 0"
+			Grid.Column="1"
+			VerticalAlignment="Top"
+			HorizontalAlignment="Left"
+			Source="pack://application:,,,/Resources/Images/Lp_Ikon.png"
+			Height="35" 
+			Width="35"/>
+		<TextBlock
+			Margin="0 3 0 0"
+			Grid.Column="3"
+			Text="LaunchPad" 
+			Foreground="{DynamicResource AppFontColorPrimary}" 
+			FontSize="25"/>
+
+		<Rectangle 
+			Grid.Column="4" 
+			Fill="Transparent"/>
+        <Button
+			Style="{StaticResource BaseButtonStyle}"
+			Panel.ZIndex="2"
+			Name="clsbtn"
+			Command="{Binding clsbtnCommand}"
+			Grid.Column="7"
+			Content=""/>
+		<Button
+			Style="{StaticResource BaseButtonStyle}"
+			Panel.ZIndex="2"
+            Name="maximbtn"
+            Command="{Binding maximbtnCommand}"
+            Grid.Column="6"
+            Content="{Binding MaximbtnContent}"/>
+		<Button
+			Style="{StaticResource BaseButtonStyle}"
+			Panel.ZIndex="2"
+            Name="minimbtn"
+            Command="{Binding minimbtnCommand}"
+            Grid.Column="5"
+            Content=""/>
+    </Grid>
+</UserControl>
+
+
+===== View\TitleBar.xaml.cs =====
+
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+
+namespace LaunchPad.View
+{
+    public partial class TitleBar : UserControl 
+    {
+        public TitleBar()
+        {
+            InitializeComponent();
+        }
+
+        private Point mouseDownPos;
+        private bool leftmousebtndonw = false;
+
+        [DllImport("user32.dll")]
+        private static extern bool ReleaseCapture();
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
+
+        private const int WM_NCLBUTTONDOWN = 0x00A1;
+        private const int HTCAPTION = 0x02;
+
+        private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ClickCount > 1) return;
+
+            var window = Window.GetWindow(this);
+            if (window == null) return;
+
+            if (window.WindowState == WindowState.Maximized)
+            {
+                mouseDownPos = e.GetPosition(window);
+                leftmousebtndonw = true;
+                Mouse.Capture(this, CaptureMode.SubTree);
+            }
+            else
+            {
+                window.DragMove();
+            }
+        }
+
+        private void Window_MouseMove(object sender, MouseEventArgs e)
+        {
+            var window = Window.GetWindow(this);
+            if (window == null) return;
+
+            if (!leftmousebtndonw || window.WindowState != WindowState.Maximized) return;
+
+            leftmousebtndonw = false;
+            if (Mouse.Captured == this) Mouse.Capture(null);
+
+            ReleaseCapture();
+            var hwnd = new WindowInteropHelper(window).Handle;
+            SendMessage(hwnd, WM_NCLBUTTONDOWN, new IntPtr(HTCAPTION), IntPtr.Zero);
+
+        }
+
+        private void Window_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            leftmousebtndonw = false;
+            if (Mouse.Captured == this) Mouse.Capture(null);
+        }
+
+        private void TitleBar_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            var window = Window.GetWindow(this);
+            if (window == null) return;
+
+            // Toggle maximize / restore on double-click
+            if (window.WindowState == WindowState.Normal)
+            {
+                window.WindowState = WindowState.Maximized;
+            }
+            else
+            {
+                window.WindowState = WindowState.Normal;
+            }
+        }
+
+		private void Button_Click(object sender, RoutedEventArgs e)
+		{
+
+		}
+	}
+}
+
+
+===== ViewModel\FilterGroup.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Linq;
+using CommunityToolkit.Mvvm.ComponentModel;
+
+namespace LaunchPad.ViewModel
+{
+	/// <summary>
+	/// Egy "All" kapcsolóból és chipekből álló szűrőcsoport (SHOW és SOURCE is ezt használja).
+	///
+	/// - All = egyetlen chip sincs kijelölve (nincs szűrés)
+	/// - All bekapcsolva: az összes chip kikapcsol (az előző állapotot elmentjük)
+	/// - All kikapcsolva: visszajönnek a mentett chipek
+	/// - Chipre kattintás, miközben az All be van kapcsolva: csak az a chip marad, az All kikapcsol
+	/// - Az utolsó chip kivétele, vagy mind bepipálása: All bekapcsol, a chipek kiürülnek
+	/// </summary>
+	public partial class FilterGroup : ObservableObject
+	{
+		private bool _suppressSync;
+		private List<bool>? _snapshot;
+
+		public ObservableCollection<FilterOption> Options { get; } = new();
+
+		[ObservableProperty]
+		private bool isAll;
+
+		/// <summary>Akkor sül el, ha a csoport kijelölése megváltozott.</summary>
+		public event EventHandler? Changed;
+
+		public bool HasSelection => Options.Any(o => o.IsChecked);
+
+		public List<string> SelectedNames =>
+			Options.Where(o => o.IsChecked).Select(o => o.Name).ToList();
+
+		public bool IsSelected(string name) =>
+			Options.Any(o => o.IsChecked && o.Name == name);
+
+		public FilterGroup(IEnumerable<string> names, IEnumerable<string>? initiallySelected = null)
+		{
+			var initial = new HashSet<string>(initiallySelected ?? Array.Empty<string>());
+
+			foreach (var name in names)
+			{
+				var option = new FilterOption(name) { IsChecked = initial.Contains(name) };
+				option.PropertyChanged += OnOptionChanged;
+				Options.Add(option);
+			}
+
+			// Kezdőállapot: ha nincs kijelölt chip, az All be van kapcsolva
+			_suppressSync = true;
+			try { IsAll = !HasSelection; }
+			finally { _suppressSync = false; }
+		}
+
+		partial void OnIsAllChanged(bool value)
+		{
+			if (_suppressSync) return; // programból állítottuk, nem a felhasználó
+
+			_suppressSync = true;
+			try
+			{
+				if (value)
+				{
+					_snapshot = Options.Select(o => o.IsChecked).ToList();
+					foreach (var option in Options)
+						option.IsChecked = false;
+				}
+				else
+				{
+					if (_snapshot != null)
+					{
+						for (int i = 0; i < Options.Count && i < _snapshot.Count; i++)
+							Options[i].IsChecked = _snapshot[i];
+					}
+					_snapshot = null;
+				}
+			}
+			finally
+			{
+				_suppressSync = false;
+			}
+
+			Changed?.Invoke(this, EventArgs.Empty);
+		}
+
+		private void OnOptionChanged(object? sender, PropertyChangedEventArgs e)
+		{
+			if (e.PropertyName != nameof(FilterOption.IsChecked)) return;
+			if (_suppressSync) return;
+
+			int checkedCount = Options.Count(o => o.IsChecked);
+
+			if (checkedCount == Options.Count)
+			{
+				// Kézzel mindet bepipáltad = ugyanaz, mint az All: chipek kiürítése, All bekapcsol
+				_suppressSync = true;
+				try
+				{
+					foreach (var option in Options)
+						option.IsChecked = false;
+					IsAll = true;
+				}
+				finally { _suppressSync = false; }
+
+				_snapshot = null;
+			}
+			else if (checkedCount == 0)
+			{
+				// Az utolsó chipet is kivetted: nincs szűrés, vagyis All
+				SetIsAllSilently(true);
+				_snapshot = null;
+			}
+			else if (IsAll)
+			{
+				// Chipre kattintottál, miközben az All be volt kapcsolva:
+				// csak ez a chip marad a szűrő, az All kikapcsol
+				SetIsAllSilently(false);
+				_snapshot = null;
+			}
+
+			Changed?.Invoke(this, EventArgs.Empty);
+		}
+
+		private void SetIsAllSilently(bool value)
+		{
+			_suppressSync = true;
+			try { IsAll = value; }
+			finally { _suppressSync = false; }
+		}
+	}
+}
+
+===== ViewModel\FilterOption.cs =====
+
+using CommunityToolkit.Mvvm.ComponentModel;
+
+namespace LaunchPad.ViewModel
+{
+	public partial class FilterOption : ObservableObject
+	{
+		public string Name { get; }
+
+		[ObservableProperty]
+		private bool isChecked;
+
+		public FilterOption(string name) => Name = name;
+	}
+}
+
+===== ViewModel\HomeViewModel.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.Text;
+using LaunchPad.Model;
+using LaunchPad.Services;
+
+namespace LaunchPad.ViewModel
+{
+	internal class HomeViewModel
+	{
+		private readonly GameService _gameService;
+		public ObservableCollection<Game> Favourites { get; }
+
+		public int TotalGamesCount => _gameService.TotalGamesCount;
+
+		public HomeViewModel(GameService gameService)
+		{
+			_gameService = gameService;
+			Favourites = new ObservableCollection<Game>(_gameService.Games.Where(g => g.IsFavourite));
+
+			foreach (var game in _gameService.Games)
+			{
+				game.PropertyChanged += OnGamePropertyChanged;
+			}
+
+			_gameService.Games.CollectionChanged += OnCollectionChanged;
+		}
+
+		private void OnGamePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+		{
+			if (e.PropertyName != nameof(Game.IsFavourite)) return;
+			if (sender is not Game game) return;
+			if (game.IsFavourite && !Favourites.Contains(game)) Favourites.Add(game);
+			else if (!game.IsFavourite && Favourites.Contains(game)) Favourites.Remove(game);
+		}
+
+		private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+		{
+			if (e.NewItems != null)
+			{
+				foreach (Game game in e.NewItems)
+				{
+					game.PropertyChanged += OnGamePropertyChanged;
+					if (game.IsFavourite) Favourites.Add(game);
+				}
+			}
+			if (e.OldItems != null)
+				foreach (Game game in e.OldItems)
+				{
+					game.PropertyChanged -= OnGamePropertyChanged;
+					Favourites.Remove(game);
+				}
+		}
+	}
+}
+
+===== ViewModel\LibraryViewModel.cs =====
+
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Linq;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using LaunchPad.Model;
+using LaunchPad.Services;
+
+namespace LaunchPad.ViewModel
+{
+
+	public partial class LibraryViewModel : ObservableObject
+	{
+		private const string EveryGameName = "Every game";
+		private const string FavouritesName = "Favourites";
+		private const string DeletedName = "Deleted";
+		private const string ExcludedName = "Excluded";
+
+		private readonly GameService _gameService;
+
+		public ObservableCollection<Game> Games { get; }
+
+		// SHOW csoport: Every game / Favourites / Deleted / Excluded
+		public FilterGroup ShowFilter { get; }
+
+		// SOURCE csoport: Steam / Epic / ...
+		public FilterGroup SourceFilter { get; }
+
+		public LibraryViewModel(GameService gameService)
+		{
+			_gameService = gameService;
+
+			// Alapból csak az "Every game" chip van kijelölve
+			ShowFilter = new FilterGroup(
+				new[] { EveryGameName, FavouritesName, DeletedName, ExcludedName },
+				initiallySelected: new[] { EveryGameName });
+
+			SourceFilter = new FilterGroup(
+				new[] { "Steam", "Epic", "Ubisoft", "EA", "GOG", "Battle.net", "Other" });
+
+			ShowFilter.Changed += (_, _) => RefreshGames();
+			SourceFilter.Changed += (_, _) => RefreshGames();
+
+			Games = new ObservableCollection<Game>(_gameService.Games.Where(IsVisible));
+
+			foreach (var game in _gameService.Games)
+				game.PropertyChanged += OnGamePropertyChanged;
+
+			_gameService.Games.CollectionChanged += OnCollectionChanged;
+		}
+
+		private bool IsVisible(Game game)
+		{
+			// 1) Állapot szerinti szűrés.
+			//    Ha egy chip sincs kijelölve (All), nincs szűrés: minden látszik.
+			//    Különben a kijelölt kategóriák UNIÓJA látszik.
+			bool isRegular = !game.IsDeleted && !game.IsExcluded;
+
+			bool matchesState =
+				!ShowFilter.HasSelection ||
+				(isRegular && ShowFilter.IsSelected(EveryGameName)) ||
+				(isRegular && game.IsFavourite && ShowFilter.IsSelected(FavouritesName)) ||
+				(game.IsDeleted && ShowFilter.IsSelected(DeletedName)) ||
+				(game.IsExcluded && ShowFilter.IsSelected(ExcludedName));
+
+			if (!matchesState) return false;
+
+			// 2) Source szűrés: ha egy sincs bejelölve, nincs szűrés
+			var selected = SourceFilter.SelectedNames;
+			if (selected.Count > 0 && !selected.Contains(game.Platform)) return false;
+
+			return true;
+		}
+
+		private void RefreshGames()
+		{
+			Games.Clear();
+			foreach (var game in _gameService.Games.Where(IsVisible))
+				Games.Add(game);
+		}
+
+		[RelayCommand]
+		private void ToggleFavourite(Game? game)
+		{
+			if (game == null) return;
+			game.IsFavourite = !game.IsFavourite;
+		}
+
+		[RelayCommand]
+		private void ExcludeGame(Game? game)
+		{
+			if (game == null) return;
+			_gameService.ExcludeGame(game);
+		}
+
+		[RelayCommand]
+		private void IncludeGame(Game? game)
+		{
+			if (game == null) return;
+			_gameService.IncludeGame(game);
+		}
+
+		[RelayCommand]
+		private void ChangeExePath(Game? game)
+		{
+			if (game == null) return;
+
+			var dialog = new Microsoft.Win32.OpenFileDialog
+			{
+				Title = "Select the executable to launch for this game",
+				Filter = "Executable files (*.exe)|*.exe",
+				CheckFileExists = true
+			};
+
+			if (dialog.ShowDialog() != true) return;
+
+			_gameService.ChangeGameExecutable(game, dialog.FileName);
+		}
+
+		private void OnGamePropertyChanged(object? sender, PropertyChangedEventArgs e)
+		{
+			if (e.PropertyName != nameof(Game.IsDeleted)
+			 && e.PropertyName != nameof(Game.IsExcluded)
+			 && e.PropertyName != nameof(Game.IsFavourite)
+			 && e.PropertyName != nameof(Game.Source)) return;
+			if (sender is not Game game) return;
+
+			if (!IsVisible(game)) Games.Remove(game);
+			else if (!Games.Contains(game)) Games.Add(game);
+		}
+
+		private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+		{
+			if (e.NewItems != null)
+			{
+				foreach (Game game in e.NewItems)
+				{
+					game.PropertyChanged += OnGamePropertyChanged;
+					if (IsVisible(game)) Games.Add(game);
+				}
+			}
+
+			if (e.OldItems != null)
+			{
+				foreach (Game game in e.OldItems)
+				{
+					game.PropertyChanged -= OnGamePropertyChanged;
+					Games.Remove(game);
+				}
+			}
+		}
+	}
+}
+
+===== ViewModel\MacrosViewModel.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace LaunchPad.ViewModel
+{
+	internal class MacrosViewModel
+	{
+	}
+}
+
+
+===== ViewModel\MainPageVM.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Text;
+using System.Windows.Controls;
+using CommunityToolkit.Mvvm.ComponentModel;
+using LaunchPad.View;
+
+namespace LaunchPad.ViewModel
+{
+    public partial class MainPageVM : ObservableObject
+    {
+        [ObservableProperty]
+        private UserControl _currentPage = new HomeView();
+        [ObservableProperty]
+        private bool _isHomeSelected = true;
+        [ObservableProperty]
+        private bool _isLibrarySelected;
+        [ObservableProperty]
+        private bool _isStatisticsSelected;
+        [ObservableProperty]
+        private bool _isMacrosSelected;
+        [ObservableProperty]
+        private bool _isSettingsSelected;
+
+		public ObservableCollection<object> _quickLaunchList = new ObservableCollection<object>();
+		partial void OnIsHomeSelectedChanged(bool value)
+		{
+			if (value)
+			{
+                CurrentPage = new HomeView();
+			}
+		}
+
+		partial void OnIsLibrarySelectedChanged(bool value)
+		{
+			if (value)
+			{
+                CurrentPage = new Library();
+			}
+		}
+
+		partial void OnIsStatisticsSelectedChanged(bool value)
+		{
+			if (value)
+			{
+				CurrentPage = new Statistics();
+			}
+		}
+		partial void OnIsMacrosSelectedChanged(bool value)
+		{
+			if (value)
+			{
+				CurrentPage = new Macros();
+			}
+		}
+		partial void OnIsSettingsSelectedChanged(bool value)
+		{
+			if (value)
+			{
+				CurrentPage = new Settings();
+			}
+		}
+	}
+}
+
+
+===== ViewModel\SettingsViewModel.cs =====
+
+using System;
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using LaunchPad.Services;
+using LaunchPad.View;
+
+namespace LaunchPad.ViewModel
+{
+	public partial class SettingsViewModel : ObservableObject
+	{
+		private readonly SettingsService _settingsService;
+		private readonly GameService _gameService;
+
+		public ObservableCollection<string> CustomGameFolders { get; }
+
+		[ObservableProperty]
+		private string? selectedFolder;
+
+		public SettingsViewModel(SettingsService settingsService, GameService gameService)
+		{
+			_settingsService = settingsService;
+			_gameService = gameService;
+
+			CustomGameFolders = new ObservableCollection<string>(_settingsService.Current.CustomGameFolders);
+		}
+
+		[RelayCommand]
+		private async Task AddFolder()
+		{
+			var dialog = new Microsoft.Win32.OpenFolderDialog
+			{
+				Title = "Select a folder to scan for games"
+			};
+
+			if (dialog.ShowDialog() != true) return;
+			if (CustomGameFolders.Contains(dialog.FolderName)) return;
+
+			CustomGameFolders.Add(dialog.FolderName);
+			PersistFolders();
+
+			var progressWindow = new ScanProgressWindow();
+			progressWindow.Show();
+			await _gameService.DeepScanAndMergeAsync(new[] { dialog.FolderName }, progressWindow);
+			progressWindow.Close();
+
+			_settingsService.Current.CustomFolderLastScanUtc[dialog.FolderName] = DateTime.UtcNow;
+			_settingsService.Save();
+		}
+
+		[RelayCommand]
+		private void RemoveFolder()
+		{
+			if (SelectedFolder == null) return;
+
+			CustomGameFolders.Remove(SelectedFolder);
+			PersistFolders();
+		}
+
+		[RelayCommand]
+		private async Task DeepScanWholePc()
+		{
+			var drives = DriveInfo.GetDrives()
+				.Where(d => d.DriveType == DriveType.Fixed && d.IsReady)
+				.Select(d => d.RootDirectory.FullName)
+				.ToList();
+
+			var progressWindow = new ScanProgressWindow();
+			progressWindow.Show();
+			await _gameService.DeepScanAndMergeAsync(drives, progressWindow);
+			progressWindow.Close();
+		}
+
+		private void PersistFolders()
+		{
+			_settingsService.Current.CustomGameFolders = CustomGameFolders.ToList();
+			_settingsService.Save();
+		}
+	}
+}
+
+===== ViewModel\StatisticsViewModel.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace LaunchPad.ViewModel
+{
+	internal class StatisticsViewModel
+	{
+	}
+}
+
+
+===== ViewModel\TitlebarVM.cs =====
+
+using System;
+using System.Windows;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+
+namespace LaunchPad.ViewModel
+{
+    public partial class TitlebarVM : ObservableObject
+    {
+        private Window? mainwindow;
+        [RelayCommand]
+        private void clsbtn()
+        {
+			mainwindow?.Close();
+		}
+
+        [RelayCommand]
+        private void maximbtn()
+        {
+            if (mainwindow?.WindowState == WindowState.Maximized)
+            {
+                mainwindow.WindowState = WindowState.Normal;
+            }
+            else
+            {
+                mainwindow?.WindowState = WindowState.Maximized;
+            }
+
+        }
+
+        [RelayCommand]
+        private void minimbtn()
+        {
+            mainwindow?.WindowState = WindowState.Minimized;
+        }
+
+        private void UpdateMaximBtnContent()
+        {
+            if (mainwindow?.WindowState == WindowState.Maximized)
+            {
+                MaximbtnContent = "";
+            }
+            else
+            {
+                MaximbtnContent = "";
+            }
+        }
+
+        public TitlebarVM()
+        {
+            mainwindow = Application.Current?.MainWindow;
+            if (mainwindow != null)
+            {
+                UpdateMaximBtnContent();   
+                _windowSt = mainwindow.WindowState;
+                mainwindow.StateChanged += Mainwindow_StateChanged;
+            }
+        }
+
+        private void Mainwindow_StateChanged(object? sender, EventArgs e)
+        {
+            WindowSt = mainwindow?.WindowState ?? WindowState.Normal;
+            UpdateMaximBtnContent();
+        }
+
+        [ObservableProperty]
+        private WindowState _windowSt;
+        [ObservableProperty]
+        private string _maximbtnContent = "";
+
+	}
+}
+
