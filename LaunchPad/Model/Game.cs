@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
@@ -9,6 +9,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
+using LaunchPad.Helpers;
 
 namespace LaunchPad.Model
 {
@@ -22,9 +23,18 @@ namespace LaunchPad.Model
 		private bool isFavourite;
 		[ObservableProperty]
 		private bool isDeleted;
-        [ObservableProperty]
-        private bool _isExcluded;
-        public List<Session> Sessions { get; set; } = new();
+		[ObservableProperty]
+		private bool _isExcluded;
+
+		/// <summary>
+		/// A játék telepítési mappája. A GameProcessMonitor ez alapján ismeri fel a futását:
+		/// bármelyik, ez alatt futó (nem telepítő/segéd) processz = a játék fut.
+		/// Null esetén csak a pontos Source exe-t figyeljük.
+		/// </summary>
+		[ObservableProperty]
+		private string? installRoot;
+
+		public List<Session> Sessions { get; set; } = new();
 		[JsonIgnore]
 		public int TotalPlaytimeSeconds => Sessions.Sum(s => s.DurationSeconds);
 		[JsonIgnore]
@@ -46,7 +56,7 @@ namespace LaunchPad.Model
 			if (lower.Contains(@"\epic games\")) return "Epic";
 			if (lower.Contains(@"\ubisoft game launcher\")) return "Ubisoft";
 			if (lower.Contains(@"\ea games\") || lower.Contains(@"\origin games\")) return "EA";
-			if (lower.Contains(@"\gog galaxy\")) return "GOG"; 
+			if (lower.Contains(@"\gog galaxy\")) return "GOG";
 			if (lower.Contains("battle.net") || lower.Contains("blizzard")) return "Battle.net";
 			return "Other";
 		}
@@ -145,8 +155,15 @@ namespace LaunchPad.Model
 				return _icon;
 			}
 		}
+
+		/// <summary>A jelenleg futó session (nem szerializálódik, a monitor állítja vissza induláskor az IsOpen alapján).</summary>
 		[JsonIgnore]
 		public Session? ActiveSession { get; private set; }
+
+		/// <summary>Igaz, amíg a játék fut (van aktív session). Bindolható a UI-ban.</summary>
+		[JsonIgnore]
+		public bool IsRunning => ActiveSession != null;
+
 		[JsonIgnore]
 		public string LastPlayedLabel => LastPlayedUtc.HasValue
 			? $"Played {this.LastPlayedFormatted}"
@@ -158,35 +175,81 @@ namespace LaunchPad.Model
 			OnPropertyChanged(nameof(Icon));
 			OnPropertyChanged(nameof(IsGame));
 			OnPropertyChanged(nameof(Platform));
+
+			// Ha az exe kikerült a telepítési mappából (pl. "Change exe path"),
+			// a régi InstallRoot hibás lenne - inkább eldobjuk, a scan újra kitöltheti.
+			if (!string.IsNullOrEmpty(InstallRoot) && !PathHelper.IsUnderDirectory(InstallRoot, value))
+				InstallRoot = null;
 		}
-		public void StartSession()
+
+		// -------------------------------------------------------------------
+		// SESSION KEZELÉS - kizárólag a UI szálról hívandó (a monitor is oda dispatch-el)
+		// -------------------------------------------------------------------
+
+		/// <summary>Új, nyitott session. A StartedAt a processz valódi indulása, a "most" a mostani idő.</summary>
+		public Session StartSession(DateTime startedUtc, DateTime nowUtc)
 		{
+			if (ActiveSession != null) return ActiveSession;
+
+			if (startedUtc > nowUtc) startedUtc = nowUtc;
+
 			var session = new Session
 			{
-				StartedAt = DateTime.UtcNow,
-				EndedAt = DateTime.UtcNow,
+				StartedAt = startedUtc,
+				EndedAt = nowUtc,
+				IsOpen = true,
 			};
 			Sessions.Add(session);
 			ActiveSession = session;
 			RefreshDerivedProperties();
+			return session;
 		}
 
-		public void FlushSession()
+		/// <summary>Lemezről betöltött, még nyitott sessiont aktívvá tesz (újraindítás / összeomlás utáni helyreállítás).</summary>
+		public void ResumeSession(Session session)
 		{
-			if (ActiveSession == null) return;
+			if (ActiveSession != null) return;
 
-			ActiveSession.EndedAt = DateTime.UtcNow;
+			if (session.EndedAt < session.StartedAt) session.EndedAt = session.StartedAt;
+			session.IsOpen = true;
+			ActiveSession = session;
 			RefreshDerivedProperties();
 		}
-		public void EndSession()
+
+		/// <summary>"Még fut": az EndedAt-et előre tolja. Soha nem viszi vissza az időt.</summary>
+		public void FlushSession(DateTime nowUtc)
 		{
 			if (ActiveSession == null) return;
-			ActiveSession.EndedAt = DateTime.UtcNow;
+
+			if (nowUtc > ActiveSession.EndedAt)
+				ActiveSession.EndedAt = nowUtc;
+			RefreshDerivedProperties();
+		}
+
+		/// <summary>
+		/// Lezárja az aktív sessiont a megadott időpontban. Ha az eredmény rövidebb, mint
+		/// discardIfShorterThanSeconds, a sessiont teljesen eldobja (azonnal összeomló indítás = nem játék).
+		/// </summary>
+		public void EndSession(DateTime endedUtc, int discardIfShorterThanSeconds = 0)
+		{
+			var session = ActiveSession;
+			if (session == null) return;
+
+			if (endedUtc < session.StartedAt) endedUtc = session.StartedAt;
+
+			session.EndedAt = endedUtc;
+			session.IsOpen = false;
 			ActiveSession = null;
+
+			if (discardIfShorterThanSeconds > 0 && session.DurationSeconds < discardIfShorterThanSeconds)
+				Sessions.Remove(session);
+
 			RefreshDerivedProperties();
 		}
+
 		private void RefreshDerivedProperties()
 		{
+			OnPropertyChanged(nameof(IsRunning));
 			OnPropertyChanged(nameof(TotalPlaytimeSeconds));
 			OnPropertyChanged(nameof(LaunchCount));
 			OnPropertyChanged(nameof(LastPlayedUtc));
@@ -211,9 +274,6 @@ namespace LaunchPad.Model
 			if (string.IsNullOrEmpty(exepath)) return null;
 			string lower = exepath.ToLowerInvariant();
 			return GamePlatformPaths.Any(p => lower.Contains(p));
-
-
-
 		}
 		private static ImageSource? ExtractIcon(string? exePath)
 		{

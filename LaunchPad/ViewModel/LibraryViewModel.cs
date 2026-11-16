@@ -1,4 +1,5 @@
-﻿using System.Collections.ObjectModel;
+
+using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
@@ -18,6 +19,7 @@ namespace LaunchPad.ViewModel
 		private const string ExcludedName = "Excluded";
 
 		private readonly GameService _gameService;
+		private readonly GameLauncher _launcher;
 
 		public ObservableCollection<Game> Games { get; }
 
@@ -27,9 +29,10 @@ namespace LaunchPad.ViewModel
 		// SOURCE csoport: Steam / Epic / ...
 		public FilterGroup SourceFilter { get; }
 
-		public LibraryViewModel(GameService gameService)
+		public LibraryViewModel(GameService gameService, GameLauncher launcher)
 		{
 			_gameService = gameService;
+			_launcher = launcher;
 
 			// Alapból csak az "Every game" chip van kijelölve
 			ShowFilter = new FilterGroup(
@@ -48,6 +51,13 @@ namespace LaunchPad.ViewModel
 				game.PropertyChanged += OnGamePropertyChanged;
 
 			_gameService.Games.CollectionChanged += OnCollectionChanged;
+		}
+
+		[RelayCommand]
+		private void LaunchGame(Game? game)
+		{
+			if (game == null) return;
+			_launcher.LaunchWithFeedback(game);
 		}
 
 		private bool IsVisible(Game game)

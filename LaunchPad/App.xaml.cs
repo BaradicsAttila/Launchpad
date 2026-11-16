@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Windows;
 using LaunchPad;
@@ -33,6 +34,8 @@ namespace LaunchPad
             services.AddSingleton<SettingsService>();
             services.AddSingleton<GameScanner>();
             services.AddSingleton<GameInstallWatcher>();
+            services.AddSingleton<GameProcessMonitor>();
+            services.AddSingleton<GameLauncher>();
 
             services.AddTransient<HomeViewModel>();
             services.AddTransient<LibraryViewModel>();
@@ -99,9 +102,14 @@ namespace LaunchPad
             var installWatcher = _serviceProvider.GetRequiredService<GameInstallWatcher>();
             installWatcher.Start();
 
+            // A session-figyelés a scan UTÁN indul: így a játékok már megkapták az InstallRoot-ot,
+            // és a lemezről betöltött nyitott sessionök (összeomlás után) itt kerülnek helyreállításra.
+            var processMonitor = _serviceProvider.GetRequiredService<GameProcessMonitor>();
+            processMonitor.Start();
+
             var mainWindow = new MainWindow();
-            Application.Current.MainWindow = mainWindow;   
-                                                           
+            Application.Current.MainWindow = mainWindow;
+
             mainWindow.Show();
 
             ShutdownMode = ShutdownMode.OnMainWindowClose;
@@ -109,18 +117,38 @@ namespace LaunchPad
 
         protected override void OnExit(ExitEventArgs e)
         {
-            var gameService = _serviceProvider.GetRequiredService<GameService>();
+            // Minden lépés külön védve van, hogy egy hiba ne akadályozza a többi mentését.
 
-            foreach (var game in gameService.Games.Where(g => g.ActiveSession != null))
-                game.EndSession();
+            // 1) Session-figyelés leállítása. NEM zárja le a futó játék sessionjét (a játék az app
+            //    bezárása után is futhat), csak előre tolja az EndedAt-et; a nem futókat lezárja.
+            try
+            {
+                _serviceProvider.GetRequiredService<GameProcessMonitor>().StopAndPersist();
+            }
+            catch (Exception ex) { Debug.WriteLine($"[OnExit] Monitor: {ex.Message}"); }
 
-            gameService.Save();
+            // 2) Játékok mentése
+            try
+            {
+                var gameService = _serviceProvider.GetRequiredService<GameService>();
+                gameService.Save();
+                gameService.Dispose();
+            }
+            catch (Exception ex) { Debug.WriteLine($"[OnExit] GameService: {ex.Message}"); }
 
-            var settingsService = _serviceProvider.GetRequiredService<SettingsService>();
-            settingsService.Save();
+            // 3) Beállítások mentése
+            try
+            {
+                _serviceProvider.GetRequiredService<SettingsService>().Save();
+            }
+            catch (Exception ex) { Debug.WriteLine($"[OnExit] Settings: {ex.Message}"); }
 
-            var installWatcher = _serviceProvider.GetRequiredService<GameInstallWatcher>();
-            installWatcher.Dispose();
+            // 4) Watcherek felszabadítása
+            try
+            {
+                _serviceProvider.GetRequiredService<GameInstallWatcher>().Dispose();
+            }
+            catch (Exception ex) { Debug.WriteLine($"[OnExit] Watcher: {ex.Message}"); }
 
             base.OnExit(e);
         }

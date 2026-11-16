@@ -1,28 +1,46 @@
-﻿using LaunchPad.Model;
+using LaunchPad.Model;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
-using System.Text;
-using System.Linq;
-using System.Threading.Tasks;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Threading;
 
 namespace LaunchPad.Services
 {
 	public class GameService : IDisposable
 	{
+		// Csak ezek a tulajdonságok kerülnek a Games.json-ba. A származtatott értékek
+		// (IsRunning, TotalPlaytimeSeconds, ...) változása NEM triggerel mentést.
+		private static readonly HashSet<string> PersistedProperties = new()
+		{
+			nameof(Game.Source),
+			nameof(Game.IsFavourite),
+			nameof(Game.IsDeleted),
+			nameof(Game.IsExcluded),
+			nameof(Game.InstallRoot),
+		};
+
 		private readonly GameStorage _storage;
 		private readonly GameScanner _scanner;
 		private readonly SettingsService _settingsService;
+		private readonly Dispatcher _dispatcher;
 
-		// Gyors, csak File.Exists-et ellenorzo timer - torles/visszatoltes
-		// eszleleset vegzi, semmilyen mentest nem trigerel feleslegesen.
-		private readonly System.Timers.Timer _safetyTimer;
+		// Törlés/visszatöltés észlelése. DispatcherTimer -> a tick a UI szálon fut,
+		// a lassú File.Exists ellenőrzések viszont háttérszálra mennek.
+		private readonly DispatcherTimer _availabilityTimer;
 
-		// Ritkabb timer, ami az aktiv jatszesi session-oket menti biztonsagi
-		// mentaskent, ha az app kozben osszeomlana.
-		private readonly System.Timers.Timer _sessionFlushTimer;
+		// Debounce-olt mentés: sok gyors változásból egyetlen írás lesz.
+		private readonly DispatcherTimer _saveTimer;
+
+		private int _availabilityCheckRunning;
+		private bool _disposed;
 
 		public ObservableCollection<Game> Games { get; } = new();
 
@@ -33,6 +51,7 @@ namespace LaunchPad.Services
 			_storage = storage;
 			_scanner = scanner;
 			_settingsService = settingsService;
+			_dispatcher = Application.Current.Dispatcher;
 
 			var loaded = _storage.LoadGames();
 			foreach (var game in loaded)
@@ -42,50 +61,68 @@ namespace LaunchPad.Services
 			}
 			Games.CollectionChanged += OnCollectionChanged;
 
-			_safetyTimer = new System.Timers.Timer(3000);
-			_safetyTimer.Elapsed += (_, _) =>
+			_saveTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
 			{
-				MarkMissingGamesAsDeleted();
-				RestoreReappearedGames();
+				Interval = TimeSpan.FromSeconds(1)
 			};
-			_safetyTimer.AutoReset = true;
-			_safetyTimer.Start();
+			_saveTimer.Tick += (_, _) =>
+			{
+				_saveTimer.Stop();
+				Save();
+			};
 
-			_sessionFlushTimer = new System.Timers.Timer(30000);
-			_sessionFlushTimer.Elapsed += (_, _) => FlushActiveSessions();
-			_sessionFlushTimer.AutoReset = true;
-			_sessionFlushTimer.Start();
+			_availabilityTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
+			{
+				Interval = TimeSpan.FromSeconds(3)
+			};
+			_availabilityTimer.Tick += async (_, _) => await RunAvailabilityCheckAsync();
+			_availabilityTimer.Start();
 		}
+
+		// -------------------------------------------------------------------
+		// SZÁLKEZELÉS SEGÉDEK
+		// -------------------------------------------------------------------
+
+		private void OnUi(Action action)
+		{
+			if (_dispatcher.CheckAccess()) action();
+			else _dispatcher.Invoke(action);
+		}
+
+		private T OnUiResult<T>(Func<T> func)
+		{
+			return _dispatcher.CheckAccess() ? func() : _dispatcher.Invoke(func);
+		}
+
+		// -------------------------------------------------------------------
+		// SCAN
+		// -------------------------------------------------------------------
+
 		public async Task ScanAndMergeAsync(IProgress<string>? progress = null)
 		{
-			var results = await _scanner.RunInstantScansAsync(progress);
-			MergeWithScanResults(results);
-			Save();
+			var results = await _scanner.RunInstantScansAsync(progress).ConfigureAwait(false);
+
+			// A Games gyűjteményt csak a UI szál módosíthatja - a GameInstallWatcher
+			// timere háttérszálról hívja ezt a metódust.
+			await _dispatcher.InvokeAsync(() =>
+			{
+				MergeWithScanResults(results);
+				Save();
+			});
 		}
 
 		public async Task DeepScanAndMergeAsync(IEnumerable<string> folders, IProgress<string>? progress = null)
 		{
-			var results = await _scanner.ScanFoldersAsync(folders, progress);
-			MergeWithScanResults(results);
-			Save();
-		}
+			var results = await _scanner.ScanFoldersAsync(folders, progress).ConfigureAwait(false);
 
-		private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
-		{
-			if (e.NewItems != null)
+			await _dispatcher.InvokeAsync(() =>
 			{
-				foreach (Game game in e.NewItems)
-				{
-					SubscribeToGame(game);
-				}
-			}
-			Save();
-		}
-		private void SubscribeToGame(Game game)
-		{
-			game.PropertyChanged += (_, _) => Save();
+				MergeWithScanResults(results);
+				Save();
+			});
 		}
 
+		/// <summary>Csak a UI szálról hívható.</summary>
 		public void MergeWithScanResults(List<GameScanResult> scanResults)
 		{
 			var excludedPaths = _settingsService.Current.ExcludedGamePaths;
@@ -109,6 +146,12 @@ namespace LaunchPad.Services
 					if (!string.Equals(existing.Source, result.ExePath, StringComparison.OrdinalIgnoreCase))
 						existing.Source = result.ExePath;
 
+					// A Source váltása null-ra állíthatta az InstallRoot-ot, ezért UTÁNA töltjük.
+					// A régi rekordok is így kapják meg az InstallRoot-ot az első indításkor.
+					if (!string.IsNullOrEmpty(result.InstallRoot) &&
+						!string.Equals(existing.InstallRoot, result.InstallRoot, StringComparison.OrdinalIgnoreCase))
+						existing.InstallRoot = result.InstallRoot;
+
 					// A jatekot korabban torolve jeloltuk (a fajl eltunt), de a
 					// scanner most ujra megtalalta - tehat visszatoltottek.
 					if (existing.IsDeleted)
@@ -116,63 +159,90 @@ namespace LaunchPad.Services
 				}
 				else
 				{
-					Games.Add(new Game(
-					name: result.GameName,
-					source: result.ExePath,
-					isFavourite: false,
-					isDeleted: false,
-					sessions: null
-					));
+					var game = new Game(
+						name: result.GameName,
+						source: result.ExePath,
+						isFavourite: false,
+						isDeleted: false,
+						sessions: null);
+
+					game.InstallRoot = result.InstallRoot;
+					Games.Add(game);
 				}
 			}
 		}
 
-		private void FlushActiveSessions()
+		// -------------------------------------------------------------------
+		// TÖRLÉS / VISSZATÖLTÉS ÉSZLELÉS
+		// -------------------------------------------------------------------
+
+		private async Task RunAvailabilityCheckAsync()
 		{
-			var activeSessions = Games.Where(g => g.ActiveSession != null).ToList();
-			if (!activeSessions.Any()) return;
-			foreach (var game in activeSessions) game.FlushSession();
-			Save();
+			if (_disposed) return;
+			// Ha az előző ellenőrzés még tart (lassú / lecsatolt lemez), kihagyjuk ezt a tick-et.
+			if (Interlocked.Exchange(ref _availabilityCheckRunning, 1) == 1) return;
 
-		}
-
-		public void MarkMissingGamesAsDeleted()
-		{
-			bool anyChanged = false;
-
-			foreach (var game in Games.Where(g => !g.IsDeleted && !g.IsExcluded))
+			try
 			{
-				if (!File.Exists(game.Source))
-				{
-					game.IsDeleted = true;
-					anyChanged = true;
-				}
-			}
+				var snapshot = SnapshotForAvailability();
+				var exists = await Task.Run(() => snapshot.Select(x => File.Exists(x.Path)).ToList());
 
-			if (anyChanged) Save();
+				// Az await után a UI szálon vagyunk (DispatcherSynchronizationContext).
+				if (_disposed) return;
+				ApplyAvailability(snapshot, exists);
+			}
+			catch (Exception ex)
+			{
+				Debug.WriteLine($"[GameService] Availability check hiba: {ex.Message}");
+			}
+			finally
+			{
+				Volatile.Write(ref _availabilityCheckRunning, 0);
+			}
 		}
 
-		/// <summary>
-		/// A korabban torolve jelolt jatekokat visszaallitja, ha a Source
-		/// path-juk idokozben ujra letezik (pl. a felhasznalo visszatoltotte
-		/// ugyanoda a jatekot). Fuggetlen a FileSystemWatcher-ektol, ezert
-		/// akkor is mukodik, ha egy mappa torlese/ujraletrehozasa miatt a
-		/// watcher esemenyei elvesznek.
-		/// </summary>
-		public void RestoreReappearedGames()
+		private List<(Game Game, string Path)> SnapshotForAvailability()
 		{
-			bool anyChanged = false;
+			return Games
+				.Where(g => !g.IsExcluded)
+				.Select(g => (g, g.Source))
+				.ToList();
+		}
 
-			foreach (var game in Games.Where(g => g.IsDeleted && !g.IsExcluded))
+		private void ApplyAvailability(List<(Game Game, string Path)> snapshot, List<bool> exists)
+		{
+			for (int i = 0; i < snapshot.Count && i < exists.Count; i++)
 			{
-				if (File.Exists(game.Source))
-				{
-					game.IsDeleted = false;
-					anyChanged = true;
-				}
-			}
+				var (game, path) = snapshot[i];
 
-			if (anyChanged) Save();
+				// Közben módosult (pl. Change exe path / Exclude) -> az eredmény elavult.
+				if (game.IsExcluded) continue;
+				if (!string.Equals(game.Source, path, StringComparison.OrdinalIgnoreCase)) continue;
+
+				bool shouldBeDeleted = !exists[i];
+				if (game.IsDeleted != shouldBeDeleted)
+					game.IsDeleted = shouldBeDeleted;   // a PropertyChanged úgyis kér mentést
+			}
+		}
+
+		/// <summary>Bármely szálról hívható (a fájlellenőrzés a hívó szálon, a módosítás a UI szálon fut).</summary>
+		public void MarkMissingGamesAsDeleted() => SyncAvailabilityBlocking();
+
+		/// <summary>Bármely szálról hívható.</summary>
+		public void RestoreReappearedGames() => SyncAvailabilityBlocking();
+
+		private void SyncAvailabilityBlocking()
+		{
+			try
+			{
+				var snapshot = OnUiResult(SnapshotForAvailability);
+				var exists = snapshot.Select(x => File.Exists(x.Path)).ToList();
+				OnUi(() => ApplyAvailability(snapshot, exists));
+			}
+			catch (Exception ex)
+			{
+				Debug.WriteLine($"[GameService] SyncAvailability hiba: {ex.Message}");
+			}
 		}
 
 		public List<string> GetChangedCustomFolders(
@@ -196,12 +266,16 @@ namespace LaunchPad.Services
 			return changed;
 		}
 
+		// -------------------------------------------------------------------
+		// KIZÁRÁS / EXE CSERE
+		// -------------------------------------------------------------------
+
 		/// <summary>
 		/// A jatekot "kizartra" allitja: mostantol nem jelenik meg a Libraryban,
 		/// es a jelenlegi Source path-ja felkerul a kizart utak listajara, hogy
 		/// egyetlen jovobeli scan se hozza vissza/hozza letre ujra ugyanezen
 		/// az uton. Maga a rekord (statisztikak, session-ok) megmarad a
-		/// Games.json-ban.
+		/// Games.json-ban. (Az esetleg futó sessiont a monitor zárja le.)
 		/// </summary>
 		public void ExcludeGame(Game game)
 		{
@@ -253,18 +327,79 @@ namespace LaunchPad.Services
 			if (!alreadyThere) excluded.Add(path);
 		}
 
+		// -------------------------------------------------------------------
+		// MENTÉS
+		// -------------------------------------------------------------------
 
+		private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+		{
+			if (e.NewItems != null)
+			{
+				foreach (Game game in e.NewItems)
+					SubscribeToGame(game);
+			}
+			RequestSave();
+		}
+
+		private void SubscribeToGame(Game game)
+		{
+			game.PropertyChanged += OnGamePropertyChanged;
+		}
+
+		private void OnGamePropertyChanged(object? sender, PropertyChangedEventArgs e)
+		{
+			if (e.PropertyName != null && PersistedProperties.Contains(e.PropertyName))
+				RequestSave();
+		}
+
+		/// <summary>Késleltetett (1 mp-es debounce) mentés. Bármely szálról hívható.</summary>
+		public void RequestSave()
+		{
+			if (_disposed) return;
+
+			if (!_dispatcher.CheckAccess())
+			{
+				_dispatcher.BeginInvoke(new Action(RequestSave));
+				return;
+			}
+
+			_saveTimer.Stop();
+			_saveTimer.Start();
+		}
+
+		/// <summary>
+		/// Azonnali mentés. Bármely szálról hívható: a szerializálás mindig a UI szálon történik,
+		/// így közben egyetlen Sessions lista sem módosulhat. Hiba esetén nem dob kivételt, hanem újrapróbálja.
+		/// </summary>
 		public void Save()
 		{
-			_storage.SaveGames(Games.ToList());
+			if (!_dispatcher.CheckAccess())
+			{
+				try { _dispatcher.Invoke(new Action(Save)); }
+				catch (Exception ex) { Debug.WriteLine($"[GameService] Save marshal hiba: {ex.Message}"); }
+				return;
+			}
+
+			_saveTimer.Stop();
+
+			try
+			{
+				_storage.SaveGames(Games.ToList());
+			}
+			catch (Exception ex)
+			{
+				Debug.WriteLine($"[GameService] Mentés sikertelen, újrapróbáljuk: {ex.Message}");
+				if (!_disposed) _saveTimer.Start();
+			}
 		}
 
 		public void Dispose()
 		{
-			_safetyTimer?.Stop();
-			_safetyTimer?.Dispose();
-			_sessionFlushTimer?.Stop();
-			_sessionFlushTimer?.Dispose();
+			if (_disposed) return;
+			_disposed = true;
+
+			_availabilityTimer.Stop();
+			_saveTimer.Stop();
 		}
 	}
 }

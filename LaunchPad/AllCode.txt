@@ -16,6 +16,7 @@
 ===== App.xaml.cs =====
 
 using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Windows;
 using LaunchPad;
@@ -50,6 +51,8 @@ namespace LaunchPad
             services.AddSingleton<SettingsService>();
             services.AddSingleton<GameScanner>();
             services.AddSingleton<GameInstallWatcher>();
+            services.AddSingleton<GameProcessMonitor>();
+            services.AddSingleton<GameLauncher>();
 
             services.AddTransient<HomeViewModel>();
             services.AddTransient<LibraryViewModel>();
@@ -116,9 +119,14 @@ namespace LaunchPad
             var installWatcher = _serviceProvider.GetRequiredService<GameInstallWatcher>();
             installWatcher.Start();
 
+            // A session-figyelés a scan UTÁN indul: így a játékok már megkapták az InstallRoot-ot,
+            // és a lemezről betöltött nyitott sessionök (összeomlás után) itt kerülnek helyreállításra.
+            var processMonitor = _serviceProvider.GetRequiredService<GameProcessMonitor>();
+            processMonitor.Start();
+
             var mainWindow = new MainWindow();
-            Application.Current.MainWindow = mainWindow;   
-                                                           
+            Application.Current.MainWindow = mainWindow;
+
             mainWindow.Show();
 
             ShutdownMode = ShutdownMode.OnMainWindowClose;
@@ -126,23 +134,44 @@ namespace LaunchPad
 
         protected override void OnExit(ExitEventArgs e)
         {
-            var gameService = _serviceProvider.GetRequiredService<GameService>();
+            // Minden lépés külön védve van, hogy egy hiba ne akadályozza a többi mentését.
 
-            foreach (var game in gameService.Games.Where(g => g.ActiveSession != null))
-                game.EndSession();
+            // 1) Session-figyelés leállítása. NEM zárja le a futó játék sessionjét (a játék az app
+            //    bezárása után is futhat), csak előre tolja az EndedAt-et; a nem futókat lezárja.
+            try
+            {
+                _serviceProvider.GetRequiredService<GameProcessMonitor>().StopAndPersist();
+            }
+            catch (Exception ex) { Debug.WriteLine($"[OnExit] Monitor: {ex.Message}"); }
 
-            gameService.Save();
+            // 2) Játékok mentése
+            try
+            {
+                var gameService = _serviceProvider.GetRequiredService<GameService>();
+                gameService.Save();
+                gameService.Dispose();
+            }
+            catch (Exception ex) { Debug.WriteLine($"[OnExit] GameService: {ex.Message}"); }
 
-            var settingsService = _serviceProvider.GetRequiredService<SettingsService>();
-            settingsService.Save();
+            // 3) Beállítások mentése
+            try
+            {
+                _serviceProvider.GetRequiredService<SettingsService>().Save();
+            }
+            catch (Exception ex) { Debug.WriteLine($"[OnExit] Settings: {ex.Message}"); }
 
-            var installWatcher = _serviceProvider.GetRequiredService<GameInstallWatcher>();
-            installWatcher.Dispose();
+            // 4) Watcherek felszabadítása
+            try
+            {
+                _serviceProvider.GetRequiredService<GameInstallWatcher>().Dispose();
+            }
+            catch (Exception ex) { Debug.WriteLine($"[OnExit] Watcher: {ex.Message}"); }
 
             base.OnExit(e);
         }
     }
 }
+
 
 ===== AssemblyInfo.cs =====
 
@@ -269,6 +298,60 @@ namespace LaunchPad.Helpers
 		}
 	}
 }
+
+===== Helpers\PathHelper.cs =====
+
+using System;
+using System.IO;
+
+namespace LaunchPad.Helpers
+{
+	public static class PathHelper
+	{
+		/// <summary>Teljes, normalizált fájlútvonal, vagy null, ha érvénytelen.</summary>
+		public static string? NormalizeFile(string? path)
+		{
+			if (string.IsNullOrWhiteSpace(path)) return null;
+			try { return Path.GetFullPath(path.Trim()); }
+			catch { return null; }
+		}
+
+		/// <summary>Teljes mappaútvonal, MINDIG záró backslash-sel (prefix-összehasonlításhoz).</summary>
+		public static string? NormalizeDirectory(string? path)
+		{
+			if (string.IsNullOrWhiteSpace(path)) return null;
+			try
+			{
+				var full = Path.GetFullPath(path.Trim());
+				return full.EndsWith(Path.DirectorySeparatorChar) ? full : full + Path.DirectorySeparatorChar;
+			}
+			catch { return null; }
+		}
+
+		/// <summary>
+		/// Mint a NormalizeDirectory, de a meghajtó gyökerét (pl. "D:\") elutasítja:
+		/// az InstallRoot-ként minden játékot "futónak" mutatna azon a lemezen.
+		/// </summary>
+		public static string? NormalizeInstallRoot(string? path)
+		{
+			var dir = NormalizeDirectory(path);
+			if (dir == null) return null;
+
+			var root = Path.GetPathRoot(dir);
+			if (string.Equals(root, dir, StringComparison.OrdinalIgnoreCase)) return null;
+
+			return dir;
+		}
+
+		public static bool IsUnderDirectory(string? directory, string? file)
+		{
+			var dir = NormalizeDirectory(directory);
+			var f = NormalizeFile(file);
+			return dir != null && f != null && f.StartsWith(dir, StringComparison.OrdinalIgnoreCase);
+		}
+	}
+}
+
 
 ===== Helpers\TextBoxHelper.cs =====
 
@@ -626,6 +709,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
+using LaunchPad.Helpers;
 
 namespace LaunchPad.Model
 {
@@ -639,9 +723,18 @@ namespace LaunchPad.Model
 		private bool isFavourite;
 		[ObservableProperty]
 		private bool isDeleted;
-        [ObservableProperty]
-        private bool _isExcluded;
-        public List<Session> Sessions { get; set; } = new();
+		[ObservableProperty]
+		private bool _isExcluded;
+
+		/// <summary>
+		/// A játék telepítési mappája. A GameProcessMonitor ez alapján ismeri fel a futását:
+		/// bármelyik, ez alatt futó (nem telepítő/segéd) processz = a játék fut.
+		/// Null esetén csak a pontos Source exe-t figyeljük.
+		/// </summary>
+		[ObservableProperty]
+		private string? installRoot;
+
+		public List<Session> Sessions { get; set; } = new();
 		[JsonIgnore]
 		public int TotalPlaytimeSeconds => Sessions.Sum(s => s.DurationSeconds);
 		[JsonIgnore]
@@ -663,7 +756,7 @@ namespace LaunchPad.Model
 			if (lower.Contains(@"\epic games\")) return "Epic";
 			if (lower.Contains(@"\ubisoft game launcher\")) return "Ubisoft";
 			if (lower.Contains(@"\ea games\") || lower.Contains(@"\origin games\")) return "EA";
-			if (lower.Contains(@"\gog galaxy\")) return "GOG"; 
+			if (lower.Contains(@"\gog galaxy\")) return "GOG";
 			if (lower.Contains("battle.net") || lower.Contains("blizzard")) return "Battle.net";
 			return "Other";
 		}
@@ -762,8 +855,15 @@ namespace LaunchPad.Model
 				return _icon;
 			}
 		}
+
+		/// <summary>A jelenleg futó session (nem szerializálódik, a monitor állítja vissza induláskor az IsOpen alapján).</summary>
 		[JsonIgnore]
 		public Session? ActiveSession { get; private set; }
+
+		/// <summary>Igaz, amíg a játék fut (van aktív session). Bindolható a UI-ban.</summary>
+		[JsonIgnore]
+		public bool IsRunning => ActiveSession != null;
+
 		[JsonIgnore]
 		public string LastPlayedLabel => LastPlayedUtc.HasValue
 			? $"Played {this.LastPlayedFormatted}"
@@ -775,35 +875,81 @@ namespace LaunchPad.Model
 			OnPropertyChanged(nameof(Icon));
 			OnPropertyChanged(nameof(IsGame));
 			OnPropertyChanged(nameof(Platform));
+
+			// Ha az exe kikerült a telepítési mappából (pl. "Change exe path"),
+			// a régi InstallRoot hibás lenne - inkább eldobjuk, a scan újra kitöltheti.
+			if (!string.IsNullOrEmpty(InstallRoot) && !PathHelper.IsUnderDirectory(InstallRoot, value))
+				InstallRoot = null;
 		}
-		public void StartSession()
+
+		// -------------------------------------------------------------------
+		// SESSION KEZELÉS - kizárólag a UI szálról hívandó (a monitor is oda dispatch-el)
+		// -------------------------------------------------------------------
+
+		/// <summary>Új, nyitott session. A StartedAt a processz valódi indulása, a "most" a mostani idő.</summary>
+		public Session StartSession(DateTime startedUtc, DateTime nowUtc)
 		{
+			if (ActiveSession != null) return ActiveSession;
+
+			if (startedUtc > nowUtc) startedUtc = nowUtc;
+
 			var session = new Session
 			{
-				StartedAt = DateTime.UtcNow,
-				EndedAt = DateTime.UtcNow,
+				StartedAt = startedUtc,
+				EndedAt = nowUtc,
+				IsOpen = true,
 			};
 			Sessions.Add(session);
 			ActiveSession = session;
 			RefreshDerivedProperties();
+			return session;
 		}
 
-		public void FlushSession()
+		/// <summary>Lemezről betöltött, még nyitott sessiont aktívvá tesz (újraindítás / összeomlás utáni helyreállítás).</summary>
+		public void ResumeSession(Session session)
 		{
-			if (ActiveSession == null) return;
+			if (ActiveSession != null) return;
 
-			ActiveSession.EndedAt = DateTime.UtcNow;
+			if (session.EndedAt < session.StartedAt) session.EndedAt = session.StartedAt;
+			session.IsOpen = true;
+			ActiveSession = session;
 			RefreshDerivedProperties();
 		}
-		public void EndSession()
+
+		/// <summary>"Még fut": az EndedAt-et előre tolja. Soha nem viszi vissza az időt.</summary>
+		public void FlushSession(DateTime nowUtc)
 		{
 			if (ActiveSession == null) return;
-			ActiveSession.EndedAt = DateTime.UtcNow;
+
+			if (nowUtc > ActiveSession.EndedAt)
+				ActiveSession.EndedAt = nowUtc;
+			RefreshDerivedProperties();
+		}
+
+		/// <summary>
+		/// Lezárja az aktív sessiont a megadott időpontban. Ha az eredmény rövidebb, mint
+		/// discardIfShorterThanSeconds, a sessiont teljesen eldobja (azonnal összeomló indítás = nem játék).
+		/// </summary>
+		public void EndSession(DateTime endedUtc, int discardIfShorterThanSeconds = 0)
+		{
+			var session = ActiveSession;
+			if (session == null) return;
+
+			if (endedUtc < session.StartedAt) endedUtc = session.StartedAt;
+
+			session.EndedAt = endedUtc;
+			session.IsOpen = false;
 			ActiveSession = null;
+
+			if (discardIfShorterThanSeconds > 0 && session.DurationSeconds < discardIfShorterThanSeconds)
+				Sessions.Remove(session);
+
 			RefreshDerivedProperties();
 		}
+
 		private void RefreshDerivedProperties()
 		{
+			OnPropertyChanged(nameof(IsRunning));
 			OnPropertyChanged(nameof(TotalPlaytimeSeconds));
 			OnPropertyChanged(nameof(LaunchCount));
 			OnPropertyChanged(nameof(LastPlayedUtc));
@@ -828,9 +974,6 @@ namespace LaunchPad.Model
 			if (string.IsNullOrEmpty(exepath)) return null;
 			string lower = exepath.ToLowerInvariant();
 			return GamePlatformPaths.Any(p => lower.Contains(p));
-
-
-
 		}
 		private static ImageSource? ExtractIcon(string? exePath)
 		{
@@ -863,11 +1006,10 @@ namespace LaunchPad.Model
 	}
 }
 
+
 ===== Model\Session.cs =====
 
 using System;
-using System.Collections.Generic;
-using System.Text;
 using System.Text.Json.Serialization;
 
 namespace LaunchPad.Model
@@ -875,14 +1017,28 @@ namespace LaunchPad.Model
 	public class Session
 	{
 		public DateTime StartedAt { get; set; }
+
+		/// <summary>
+		/// Futás közben a monitor folyamatosan előre tolja ("utoljára láttuk futni").
+		/// Ha az app összeomlik, ez az érték marad a lemezen = a session valódi vége.
+		/// </summary>
 		public DateTime EndedAt { get; set; }
+
+		/// <summary>
+		/// True, amíg a session nem zárult le rendesen. LEMEZRE IS KERÜL, így egy
+		/// összeomlás / kilövés után induláskor felismerhető a "félbehagyott" session.
+		/// A régi Games.json-ban nincs ilyen mező -> false (lezárt), ami helyes.
+		/// </summary>
+		public bool IsOpen { get; set; }
+
 		[JsonIgnore]
-		public int DurationSeconds => (int)(EndedAt-StartedAt).TotalSeconds;
+		public int DurationSeconds => Math.Max(0, (int)(EndedAt - StartedAt).TotalSeconds);
 	}
 }
 
 
 ===== Services\GameinstallWatcher.cs =====
+
 
 using System;
 using System.Collections.Generic;
@@ -1062,11 +1218,7 @@ namespace LaunchPad.Services
 
 		private void MarkGameAsDeletedByPath(string path)
 		{
-			var game = _gameService.Games.FirstOrDefault(g =>
-				string.Equals(g.Source, path, StringComparison.OrdinalIgnoreCase));
-
-			if (game != null && !game.IsDeleted)
-				game.IsDeleted = true;
+			SetDeletedStateOnUi(path, isDeleted: true);
 		}
 
 		// Ha ugyanoda (ugyanaz a mappa + fajlnev) kerul vissza az exe - pl. a
@@ -1074,11 +1226,24 @@ namespace LaunchPad.Services
 		// nelkul visszaallitjuk a lathato allapotot.
 		private void MarkGameAsRestoredByPath(string path)
 		{
-			var game = _gameService.Games.FirstOrDefault(g =>
-				string.Equals(g.Source, path, StringComparison.OrdinalIgnoreCase));
+			SetDeletedStateOnUi(path, isDeleted: false);
+		}
 
-			if (game != null && game.IsDeleted)
-				game.IsDeleted = false;
+		// A FileSystemWatcher esemenyei hatterszalon futnak, a Games gyujtemeny es a Game
+		// tulajdonsagai viszont (a Library/Home nezetek miatt) csak a UI szalrol modosithatok.
+		private void SetDeletedStateOnUi(string path, bool isDeleted)
+		{
+			var dispatcher = System.Windows.Application.Current?.Dispatcher;
+			if (dispatcher == null) return;
+
+			dispatcher.BeginInvoke(new Action(() =>
+			{
+				var game = _gameService.Games.FirstOrDefault(g =>
+					string.Equals(g.Source, path, StringComparison.OrdinalIgnoreCase));
+
+				if (game != null && game.IsDeleted != isDeleted)
+					game.IsDeleted = isDeleted;
+			}));
 		}
 
 		public void Dispose()
@@ -1100,7 +1265,576 @@ namespace LaunchPad.Services
 	}
 }
 
+
+===== Services\GameLauncher.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Windows;
+using LaunchPad.Helpers;
+using LaunchPad.Model;
+
+namespace LaunchPad.Services
+{
+	public enum LaunchOutcome
+	{
+		Started,
+		AlreadyRunning,
+		FileMissing,
+		Cancelled,   // pl. a felhasználó nemet mondott az UAC kérdésre
+		Failed
+	}
+
+	public sealed record LaunchResult(LaunchOutcome Outcome, string? Message = null);
+
+	/// <summary>
+	/// Csak elindítja a játékot. A session nyitását/zárását NEM ez végzi, hanem a GameProcessMonitor,
+	/// ezért az app-on kívülről (Steam, Explorer, parancsikon) indított játék is ugyanúgy követve lesz.
+	/// A UI szálról használandó.
+	/// </summary>
+	public class GameLauncher
+	{
+		// Dupla kattintás ellen: a monitor csak pár másodperc múlva látja meg a processzt.
+		private static readonly TimeSpan LaunchCooldown = TimeSpan.FromSeconds(8);
+
+		private readonly GameProcessMonitor _monitor;
+		private readonly Dictionary<Game, DateTime> _recentLaunches = new();
+
+		public GameLauncher(GameProcessMonitor monitor)
+		{
+			_monitor = monitor;
+		}
+
+		public LaunchResult Launch(Game game)
+		{
+			if (game.IsRunning)
+				return new LaunchResult(LaunchOutcome.AlreadyRunning);
+
+			if (_recentLaunches.TryGetValue(game, out var launchedAt) &&
+				DateTime.UtcNow - launchedAt < LaunchCooldown)
+				return new LaunchResult(LaunchOutcome.AlreadyRunning);
+
+			var exe = PathHelper.NormalizeFile(game.Source);
+			if (exe == null || !File.Exists(exe))
+			{
+				game.IsDeleted = true;
+				return new LaunchResult(LaunchOutcome.FileMissing,
+					$"A játék fájlja nem található:\n{game.Source}");
+			}
+
+			try
+			{
+				var startInfo = new ProcessStartInfo
+				{
+					FileName = exe,
+					// Sok játék a saját mappájából keresi az erőforrásait.
+					WorkingDirectory = Path.GetDirectoryName(exe) ?? string.Empty,
+					// ShellExecute: az admin jogot kérő (manifest) játékoknál is megjelenik az UAC kérdés.
+					UseShellExecute = true
+				};
+
+				using var process = Process.Start(startInfo);
+			}
+			catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+			{
+				// ERROR_CANCELLED: az UAC-t elutasították, ez nem hiba.
+				return new LaunchResult(LaunchOutcome.Cancelled);
+			}
+			catch (Exception ex)
+			{
+				return new LaunchResult(LaunchOutcome.Failed,
+					$"A játék nem indítható:\n{ex.Message}");
+			}
+
+			_recentLaunches[game] = DateTime.UtcNow;
+			_monitor.RequestFastPoll();
+
+			return new LaunchResult(LaunchOutcome.Started);
+		}
+
+		/// <summary>Mint a Launch, de hiba esetén üzenetet is mutat.</summary>
+		public LaunchResult LaunchWithFeedback(Game game)
+		{
+			var result = Launch(game);
+
+			if (result.Outcome is LaunchOutcome.FileMissing or LaunchOutcome.Failed)
+			{
+				MessageBox.Show(
+					result.Message ?? "Ismeretlen hiba.",
+					"LaunchPad",
+					MessageBoxButton.OK,
+					MessageBoxImage.Warning);
+			}
+
+			return result;
+		}
+	}
+}
+
+
+===== Services\GameProcessMonitor.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Threading;
+using LaunchPad.Helpers;
+using LaunchPad.Model;
+
+namespace LaunchPad.Services
+{
+	/// <summary>
+	/// Háttérben figyeli a futó processzeket, és ez alapján nyitja/zárja a játékok sessionjeit.
+	/// Nem tudja, ki indította a játékot (az app vagy a Steam/Explorer), ezért mindkettőt egyformán követi.
+	///
+	/// Garanciák:
+	///  - a session EndedAt-je mindig az UTOLSÓ látott futás ideje, tehát a türelmi idő és az
+	///    app-összeomlás sem tolja meg a játékidőt;
+	///  - az IsOpen flag lemezre kerül, így összeomlás / kilövés után induláskor a nyitott session
+	///    vagy folytatódik (ha a játék még fut), vagy az utolsó mentett időpontnál lezáródik;
+	///  - ha a processzlista lekérdezése hibás, a kör kimarad, és semmi sem változik;
+	///  - a Games és a Sessions kizárólag a UI szálon módosul.
+	/// </summary>
+	public sealed class GameProcessMonitor : IDisposable
+	{
+		// ------------------------------------------------------------------
+		// BEÁLLÍTÁSOK
+		// ------------------------------------------------------------------
+
+		private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(4);
+
+		// Indítás után egy ideig sűrűbben nézünk, hogy a session gyorsan megjelenjen.
+		private static readonly TimeSpan FastPollInterval = TimeSpan.FromSeconds(1);
+		private static readonly TimeSpan FastPollDuration = TimeSpan.FromSeconds(45);
+
+		// Ennyi ideig nem látott játékot zárunk le. Elnyeli a launcher->játék átadást
+		// (pl. Steam újraindítja az exe-t), hogy ne legyen két külön session.
+		private static readonly TimeSpan StopGrace = TimeSpan.FromSeconds(12);
+
+		// Két kör között ennyinél több idő telt el = a gép aludt / hibernált (a poll 4 mp).
+		private static readonly TimeSpan SleepGapThreshold = TimeSpan.FromSeconds(25);
+
+		// Futás közben legfeljebb ennyi ideje lehet a legutóbbi mentés (ennyit veszíthetünk összeomláskor).
+		private static readonly TimeSpan SaveInterval = TimeSpan.FromSeconds(10);
+
+		// Újraindítás után: ha a játék legkorábbi processze ennyivel az utolsó mentett
+		// EndedAt után indult, az már egy MÁSIK futás, nem a megszakadt session folytatása.
+		private static readonly TimeSpan ResumeTolerance = TimeSpan.FromSeconds(5);
+
+		// Ennél rövidebb sessiont eldobunk (azonnal összeomló / megszakított indítás).
+		private const int MinSessionSeconds = 10;
+
+		// ------------------------------------------------------------------
+
+		private sealed record Matcher(Game Game, string ExactPath, string? Root, string FileName);
+
+		private enum Change { None, Flushed, Structural }
+
+		private readonly GameService _gameService;
+		private readonly Dispatcher _dispatcher;
+		private readonly ProcessScanner _scanner = new();
+
+		// Csak a UI szálról érhető el.
+		private readonly HashSet<Game> _unvalidated = new();
+		private DateTime _lastTickUtc;
+		private DateTime _lastSaveUtc;
+
+		private readonly SemaphoreSlim _wake = new(0, 1);
+		private CancellationTokenSource? _cts;
+		private Task? _loop;
+		private long _fastUntilTicks;
+		private volatile bool _stopped;
+
+		public GameProcessMonitor(GameService gameService)
+		{
+			_gameService = gameService;
+			_dispatcher = Application.Current.Dispatcher;
+		}
+
+		// ------------------------------------------------------------------
+		// ÉLETCIKLUS
+		// ------------------------------------------------------------------
+
+		/// <summary>Az App.OnStartup-ból hívandó, a scan és a MarkMissingGamesAsDeleted UTÁN.</summary>
+		public void Start()
+		{
+			if (!_dispatcher.CheckAccess())
+			{
+				_dispatcher.Invoke(new Action(Start));
+				return;
+			}
+
+			if (_loop != null || _stopped) return;
+
+			RecoverOpenSessions();
+
+			_lastTickUtc = DateTime.UtcNow;
+			_lastSaveUtc = _lastTickUtc;
+
+			_cts = new CancellationTokenSource();
+			var token = _cts.Token;
+			_loop = Task.Run(() => RunLoopAsync(token));
+		}
+
+		/// <summary>
+		/// Az App.OnExit-ből hívandó. NEM zárja le a futó játék sessionjét (a játék az app után is futhat),
+		/// csak előre tolja az EndedAt-jét és elmenti. A nem futó játékok sessionjeit lezárja.
+		/// Ha a játék közben is fut, a következő indításkor a Start() folytatja a sessiont.
+		/// </summary>
+		public void StopAndPersist()
+		{
+			if (!_dispatcher.CheckAccess())
+			{
+				_dispatcher.Invoke(new Action(StopAndPersist));
+				return;
+			}
+
+			if (_stopped) return;
+			_stopped = true;
+
+			try { _cts?.Cancel(); } catch { }
+
+			try
+			{
+				var matchers = BuildMatchers();
+				var processes = _scanner.Snapshot();
+				var running = Match(matchers, processes);
+				Apply(running, DateTime.UtcNow, isFinal: true);
+			}
+			catch (Exception ex)
+			{
+				// Nem sikerült a végső pillanatkép: a nyitott sessionök nyitva maradnak az utolsó
+				// biztos EndedAt-tel, és a következő indításkor a RecoverOpenSessions rendezi őket.
+				Debug.WriteLine($"[GameProcessMonitor] Végső pillanatkép hiba: {ex.Message}");
+			}
+			finally
+			{
+				_gameService.Save();
+			}
+		}
+
+		public void Dispose()
+		{
+			_stopped = true;
+			try { _cts?.Cancel(); } catch { }
+		}
+
+		/// <summary>Indítás után sűrűbb figyelés + azonnali kör, hogy a session gyorsan megjelenjen.</summary>
+		public void RequestFastPoll()
+		{
+			Interlocked.Exchange(ref _fastUntilTicks, (DateTime.UtcNow + FastPollDuration).Ticks);
+
+			if (_wake.CurrentCount == 0)
+			{
+				try { _wake.Release(); }
+				catch (SemaphoreFullException) { }
+				catch (ObjectDisposedException) { }
+			}
+		}
+
+		private bool IsFastPollActive() => DateTime.UtcNow.Ticks < Interlocked.Read(ref _fastUntilTicks);
+
+		// ------------------------------------------------------------------
+		// HELYREÁLLÍTÁS INDULÁSKOR (UI szál)
+		// ------------------------------------------------------------------
+
+		/// <summary>
+		/// A lemezről betöltött, még IsOpen sessionöket aktívvá teszi. Hogy valóban fut-e még a játék,
+		/// az első kör dönti el: ha igen, folytatódik; ha nem, az utolsó mentett EndedAt-nél lezáródik.
+		/// </summary>
+		private void RecoverOpenSessions()
+		{
+			bool changed = false;
+
+			foreach (var game in _gameService.Games.ToList())
+			{
+				var open = game.Sessions
+					.Where(s => s.IsOpen)
+					.OrderBy(s => s.StartedAt)
+					.ToList();
+
+				if (open.Count == 0) continue;
+
+				// Egy játéknál legfeljebb egy nyitott session lehet; a többit (sérült adat) lezárjuk.
+				for (int i = 0; i < open.Count - 1; i++)
+				{
+					open[i].IsOpen = false;
+					if (open[i].EndedAt < open[i].StartedAt) open[i].EndedAt = open[i].StartedAt;
+					changed = true;
+				}
+
+				game.ResumeSession(open[^1]);
+				_unvalidated.Add(game);
+			}
+
+			if (changed) _gameService.Save();
+		}
+
+		// ------------------------------------------------------------------
+		// FŐ CIKLUS (háttérszál)
+		// ------------------------------------------------------------------
+
+		private async Task RunLoopAsync(CancellationToken ct)
+		{
+			while (!ct.IsCancellationRequested)
+			{
+				try
+				{
+					await TickAsync(ct).ConfigureAwait(false);
+				}
+				catch (OperationCanceledException)
+				{
+					break;
+				}
+				catch (Exception ex)
+				{
+					// Egy hibás kör nem állíthatja le a figyelést.
+					Debug.WriteLine($"[GameProcessMonitor] Tick hiba: {ex.Message}");
+				}
+
+				var delay = IsFastPollActive() ? FastPollInterval : PollInterval;
+
+				try
+				{
+					await _wake.WaitAsync(delay, ct).ConfigureAwait(false);
+				}
+				catch (OperationCanceledException)
+				{
+					break;
+				}
+				catch (ObjectDisposedException)
+				{
+					break;
+				}
+			}
+		}
+
+		private async Task TickAsync(CancellationToken ct)
+		{
+			if (_stopped) return;
+
+			// 1) A játékok adatai a UI szálról (a Game mezőit csak ott olvassuk).
+			var matchers = await _dispatcher.InvokeAsync(
+				() => BuildMatchers(), DispatcherPriority.Normal, ct);
+
+			// 2) Processzlista (háttérszál). Hiba esetén kivétel -> a kör kimarad, semmi nem változik.
+			var processes = _scanner.Snapshot();
+			var nowUtc = DateTime.UtcNow;
+
+			// 3) Illesztés (tiszta számítás, nincs mellékhatás).
+			var running = Match(matchers, processes);
+
+			// 4) Állapot frissítése a UI szálon.
+			await _dispatcher.InvokeAsync(
+				() => Apply(running, nowUtc, isFinal: false), DispatcherPriority.Normal, ct);
+		}
+
+		// ------------------------------------------------------------------
+		// ILLESZTÉS
+		// ------------------------------------------------------------------
+
+		private List<Matcher> BuildMatchers()
+		{
+			var list = new List<Matcher>();
+
+			foreach (var game in _gameService.Games)
+			{
+				// A kizárt / hiányzó játékot nem követjük. Ha közben nyitott sessionje van,
+				// az "nem fut" ágra kerül és türelmi idő után lezáródik.
+				if (game.IsExcluded || game.IsDeleted) continue;
+
+				var exact = PathHelper.NormalizeFile(game.Source);
+				if (exact == null) continue;
+
+				var root = PathHelper.NormalizeInstallRoot(game.InstallRoot);
+				list.Add(new Matcher(game, exact, root, Path.GetFileName(exact)));
+			}
+
+			return list;
+		}
+
+		/// <summary>Játék -> a legkorábbi illeszkedő processz indulási ideje (null, ha ismeretlen). Ami nincs a kulcsok közt, nem fut.</summary>
+		private static Dictionary<Game, DateTime?> Match(List<Matcher> matchers, List<RunningProcess> processes)
+		{
+			var result = new Dictionary<Game, DateTime?>();
+
+			foreach (var process in processes)
+			{
+				foreach (var matcher in matchers)
+				{
+					if (!IsMatch(matcher, process)) continue;
+
+					if (result.TryGetValue(matcher.Game, out var existing))
+					{
+						if (process.StartUtc.HasValue && (!existing.HasValue || process.StartUtc < existing))
+							result[matcher.Game] = process.StartUtc;
+					}
+					else
+					{
+						result[matcher.Game] = process.StartUtc;
+					}
+				}
+			}
+
+			return result;
+		}
+
+		private static bool IsMatch(Matcher matcher, RunningProcess process)
+		{
+			// Ha az útvonal nem kérdezhető le (pl. védett processz), a fájlnév egyezése is elég
+			// a Source exe-hez. Ez véd attól, hogy egy anti-cheattel védett játékot "kilépettnek" lássunk.
+			if (process.Path == null)
+				return string.Equals(process.ExeName, matcher.FileName, StringComparison.OrdinalIgnoreCase);
+
+			// A beállított exe mindig illeszkedik.
+			if (string.Equals(process.Path, matcher.ExactPath, StringComparison.OrdinalIgnoreCase))
+				return true;
+
+			// A telepítési mappa alatti többi processz is (pl. Unreal "-Shipping.exe"),
+			// kivéve a telepítő / crash handler / redist jellegűeket.
+			if (matcher.Root != null &&
+				process.Path.StartsWith(matcher.Root, StringComparison.OrdinalIgnoreCase) &&
+				!GameScanner.IsLikelyNonGameExecutable(process.Path))
+				return true;
+
+			return false;
+		}
+
+		// ------------------------------------------------------------------
+		// ÁLLAPOTGÉP (UI szál)
+		// ------------------------------------------------------------------
+
+		private void Apply(Dictionary<Game, DateTime?> running, DateTime nowUtc, bool isFinal)
+		{
+			if (_stopped && !isFinal) return;
+
+			bool gap = !isFinal && (nowUtc - _lastTickUtc) > SleepGapThreshold;
+			bool structural = false;
+			bool flushed = false;
+
+			foreach (var game in _gameService.Games.ToList())
+			{
+				try
+				{
+					switch (ApplyToGame(game, running, nowUtc, gap, isFinal))
+					{
+						case Change.Structural: structural = true; break;
+						case Change.Flushed: flushed = true; break;
+					}
+				}
+				catch (Exception ex)
+				{
+					// Egy játék hibája ne akadályozza a többit.
+					Debug.WriteLine($"[GameProcessMonitor] {game.Name}: {ex.Message}");
+				}
+			}
+
+			_lastTickUtc = nowUtc;
+
+			// Indulás / leállás: azonnal mentünk. Futás közben: legfeljebb SaveInterval-onként.
+			if (structural || (flushed && nowUtc - _lastSaveUtc >= SaveInterval))
+			{
+				_gameService.Save();
+				_lastSaveUtc = nowUtc;
+			}
+		}
+
+		private Change ApplyToGame(
+			Game game,
+			Dictionary<Game, DateTime?> running,
+			DateTime now,
+			bool gap,
+			bool isFinal)
+		{
+			var active = game.ActiveSession;
+			bool isRunning = running.TryGetValue(game, out var processStart);
+
+			// 1) A gép aludt / hibernált: az alvás nem játékidő. A sessiont az utolsó ismert
+			//    EndedAt-nél lezárjuk, és ha a játék még fut, újat nyitunk "most"-tól.
+			if (gap && active != null)
+			{
+				CloseSession(game, active.EndedAt);
+
+				if (isRunning)
+					game.StartSession(now, now);
+
+				return Change.Structural;
+			}
+
+			if (isRunning)
+			{
+				// 2) Fut, de nincs session -> új session a processz valódi indulásától.
+				if (active == null)
+				{
+					game.StartSession(ResolveStart(game, processStart, now), now);
+					return Change.Structural;
+				}
+
+				// 3) Újraindítás után az első találkozás egy lemezről folytatott sessionnel:
+				//    ha a processz az utolsó mentett EndedAt UTÁN indult, az egy másik futás.
+				if (_unvalidated.Remove(game) &&
+					processStart.HasValue &&
+					processStart.Value > active.EndedAt + ResumeTolerance)
+				{
+					CloseSession(game, active.EndedAt);
+					game.StartSession(ResolveStart(game, processStart, now), now);
+					return Change.Structural;
+				}
+
+				// 4) Fut és van session -> "még él".
+				game.FlushSession(now);
+				return Change.Flushed;
+			}
+
+			// 5) Nem fut. Az EndedAt az utolsó látott futás ideje, ezért a türelmi idő nem számít bele.
+			if (active != null && (isFinal || now - active.EndedAt >= StopGrace))
+			{
+				CloseSession(game, active.EndedAt);
+				return Change.Structural;
+			}
+
+			return Change.None;
+		}
+
+		private void CloseSession(Game game, DateTime endedUtc)
+		{
+			_unvalidated.Remove(game);
+			game.EndSession(endedUtc, MinSessionSeconds);
+		}
+
+		/// <summary>
+		/// Új session kezdete: a processz indulása, de nem korábbi, mint az előző session vége
+		/// (így két session sosem fedi át egymást), és nem a jövőben.
+		/// </summary>
+		private static DateTime ResolveStart(Game game, DateTime? processStart, DateTime now)
+		{
+			var start = processStart ?? now;
+
+			var lastEnd = game.Sessions
+				.Where(s => !s.IsOpen)
+				.Select(s => s.EndedAt)
+				.DefaultIfEmpty(DateTime.MinValue)
+				.Max();
+
+			if (start < lastEnd) start = lastEnd;
+			if (start > now) start = now;
+
+			return start;
+		}
+	}
+}
+
+
 ===== Services\GameScanner.cs =====
+
 
 using System.Diagnostics;
 using System.IO;
@@ -1114,6 +1848,7 @@ public class GameScanResult
     public string ExePath { get; set; } = string.Empty;
     public string GameName { get; set; } = string.Empty;
     public string Source { get; set; } = string.Empty;
+    public string? InstallRoot { get; set; }
 }
 
 public class GameScanner
@@ -1253,7 +1988,7 @@ public class GameScanner
     /// a jatek fo exe-je, hanem valamilyen telepito/segedprogram/
     /// futtatokornyezet.
     /// </summary>
-    private static bool IsLikelyNonGameExecutable(string filePath)
+    internal static bool IsLikelyNonGameExecutable(string filePath)
     {
         var nameOnly = Path.GetFileNameWithoutExtension(filePath).ToLowerInvariant();
         if (ExcludedExeNamePatterns.Any(pattern => nameOnly.Contains(pattern)))
@@ -1607,7 +2342,8 @@ public class GameScanner
                     {
                         ExePath = exe.FullName,
                         GameName = name ?? installDir,
-                        Source = "Steam"
+                        Source = "Steam",
+                        InstallRoot = gamePath
                     });
                 }
                 catch (Exception ex)
@@ -1722,7 +2458,8 @@ public class GameScanner
                 {
                     ExePath = exePath,
                     GameName = displayName ?? Path.GetFileNameWithoutExtension(exePath),
-                    Source = "Epic"
+                    Source = "Epic",
+                    InstallRoot = installPath
                 });
             }
             catch (Exception ex)
@@ -1769,7 +2506,8 @@ public class GameScanner
                 {
                     ExePath = exe.FullName,
                     GameName = Path.GetFileName(gameFolder),
-                    Source = "Ubisoft"
+                    Source = "Ubisoft",
+                    InstallRoot = gameFolder
                 });
             }
             catch (Exception ex)
@@ -1825,7 +2563,8 @@ public class GameScanner
                     {
                         ExePath = exe.FullName,
                         GameName = Path.GetFileName(gameFolder),
-                        Source = "EA"
+                        Source = "EA",
+                        InstallRoot = gameFolder
                     });
                 }
                 catch (Exception ex)
@@ -1873,7 +2612,8 @@ public class GameScanner
                 {
                     ExePath = exe.FullName,
                     GameName = Path.GetFileName(gameFolder),
-                    Source = "GOG"
+                    Source = "GOG",
+                    InstallRoot = gameFolder
                 });
             }
             catch (Exception ex)
@@ -1930,7 +2670,8 @@ public class GameScanner
                 {
                     ExePath = exe.FullName,
                     GameName = Path.GetFileName(root),
-                    Source = "BattleNet"
+                    Source = "BattleNet",
+                    InstallRoot = root
                 });
             }
             catch (Exception ex)
@@ -1994,7 +2735,8 @@ public class GameScanner
             {
                 ExePath = bestExe.FullName,
                 GameName = Path.GetFileName(subDir),
-                Source = "Scan"
+                Source = "Scan",
+                InstallRoot = subDir
             };
         }
     }
@@ -2209,6 +2951,10 @@ public class GameScanner
                 var newPriority = SourcePriority.GetValueOrDefault(item.Source, 99);
                 var existingPriority = SourcePriority.GetValueOrDefault(existing.Source, 99);
 
+                // Ha a mar tarolt talalatnak nincs telepitesi mappaja, az ujabbtol atvesszuk.
+                if (string.IsNullOrEmpty(existing.InstallRoot))
+                    existing.InstallRoot = item.InstallRoot;
+
                 // New source is more trustworthy — upgrade the name
                 // The object reference in seen and target point to the same instance
                 // so mutating existing.GameName updates both automatically
@@ -2216,6 +2962,8 @@ public class GameScanner
                 {
                     existing.GameName = item.GameName;
                     existing.Source = item.Source;
+                    if (!string.IsNullOrEmpty(item.InstallRoot))
+                        existing.InstallRoot = item.InstallRoot;
                 }
             }
             else
@@ -2227,6 +2975,7 @@ public class GameScanner
     }
 }
 
+
 ===== Services\GameService.cs =====
 
 using LaunchPad.Model;
@@ -2234,26 +2983,44 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
-using System.Text;
-using System.Linq;
-using System.Threading.Tasks;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Threading;
 
 namespace LaunchPad.Services
 {
 	public class GameService : IDisposable
 	{
+		// Csak ezek a tulajdonságok kerülnek a Games.json-ba. A származtatott értékek
+		// (IsRunning, TotalPlaytimeSeconds, ...) változása NEM triggerel mentést.
+		private static readonly HashSet<string> PersistedProperties = new()
+		{
+			nameof(Game.Source),
+			nameof(Game.IsFavourite),
+			nameof(Game.IsDeleted),
+			nameof(Game.IsExcluded),
+			nameof(Game.InstallRoot),
+		};
+
 		private readonly GameStorage _storage;
 		private readonly GameScanner _scanner;
 		private readonly SettingsService _settingsService;
+		private readonly Dispatcher _dispatcher;
 
-		// Gyors, csak File.Exists-et ellenorzo timer - torles/visszatoltes
-		// eszleleset vegzi, semmilyen mentest nem trigerel feleslegesen.
-		private readonly System.Timers.Timer _safetyTimer;
+		// Törlés/visszatöltés észlelése. DispatcherTimer -> a tick a UI szálon fut,
+		// a lassú File.Exists ellenőrzések viszont háttérszálra mennek.
+		private readonly DispatcherTimer _availabilityTimer;
 
-		// Ritkabb timer, ami az aktiv jatszesi session-oket menti biztonsagi
-		// mentaskent, ha az app kozben osszeomlana.
-		private readonly System.Timers.Timer _sessionFlushTimer;
+		// Debounce-olt mentés: sok gyors változásból egyetlen írás lesz.
+		private readonly DispatcherTimer _saveTimer;
+
+		private int _availabilityCheckRunning;
+		private bool _disposed;
 
 		public ObservableCollection<Game> Games { get; } = new();
 
@@ -2264,6 +3031,7 @@ namespace LaunchPad.Services
 			_storage = storage;
 			_scanner = scanner;
 			_settingsService = settingsService;
+			_dispatcher = Application.Current.Dispatcher;
 
 			var loaded = _storage.LoadGames();
 			foreach (var game in loaded)
@@ -2273,50 +3041,68 @@ namespace LaunchPad.Services
 			}
 			Games.CollectionChanged += OnCollectionChanged;
 
-			_safetyTimer = new System.Timers.Timer(3000);
-			_safetyTimer.Elapsed += (_, _) =>
+			_saveTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
 			{
-				MarkMissingGamesAsDeleted();
-				RestoreReappearedGames();
+				Interval = TimeSpan.FromSeconds(1)
 			};
-			_safetyTimer.AutoReset = true;
-			_safetyTimer.Start();
+			_saveTimer.Tick += (_, _) =>
+			{
+				_saveTimer.Stop();
+				Save();
+			};
 
-			_sessionFlushTimer = new System.Timers.Timer(30000);
-			_sessionFlushTimer.Elapsed += (_, _) => FlushActiveSessions();
-			_sessionFlushTimer.AutoReset = true;
-			_sessionFlushTimer.Start();
+			_availabilityTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
+			{
+				Interval = TimeSpan.FromSeconds(3)
+			};
+			_availabilityTimer.Tick += async (_, _) => await RunAvailabilityCheckAsync();
+			_availabilityTimer.Start();
 		}
+
+		// -------------------------------------------------------------------
+		// SZÁLKEZELÉS SEGÉDEK
+		// -------------------------------------------------------------------
+
+		private void OnUi(Action action)
+		{
+			if (_dispatcher.CheckAccess()) action();
+			else _dispatcher.Invoke(action);
+		}
+
+		private T OnUiResult<T>(Func<T> func)
+		{
+			return _dispatcher.CheckAccess() ? func() : _dispatcher.Invoke(func);
+		}
+
+		// -------------------------------------------------------------------
+		// SCAN
+		// -------------------------------------------------------------------
+
 		public async Task ScanAndMergeAsync(IProgress<string>? progress = null)
 		{
-			var results = await _scanner.RunInstantScansAsync(progress);
-			MergeWithScanResults(results);
-			Save();
+			var results = await _scanner.RunInstantScansAsync(progress).ConfigureAwait(false);
+
+			// A Games gyűjteményt csak a UI szál módosíthatja - a GameInstallWatcher
+			// timere háttérszálról hívja ezt a metódust.
+			await _dispatcher.InvokeAsync(() =>
+			{
+				MergeWithScanResults(results);
+				Save();
+			});
 		}
 
 		public async Task DeepScanAndMergeAsync(IEnumerable<string> folders, IProgress<string>? progress = null)
 		{
-			var results = await _scanner.ScanFoldersAsync(folders, progress);
-			MergeWithScanResults(results);
-			Save();
-		}
+			var results = await _scanner.ScanFoldersAsync(folders, progress).ConfigureAwait(false);
 
-		private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
-		{
-			if (e.NewItems != null)
+			await _dispatcher.InvokeAsync(() =>
 			{
-				foreach (Game game in e.NewItems)
-				{
-					SubscribeToGame(game);
-				}
-			}
-			Save();
-		}
-		private void SubscribeToGame(Game game)
-		{
-			game.PropertyChanged += (_, _) => Save();
+				MergeWithScanResults(results);
+				Save();
+			});
 		}
 
+		/// <summary>Csak a UI szálról hívható.</summary>
 		public void MergeWithScanResults(List<GameScanResult> scanResults)
 		{
 			var excludedPaths = _settingsService.Current.ExcludedGamePaths;
@@ -2340,6 +3126,12 @@ namespace LaunchPad.Services
 					if (!string.Equals(existing.Source, result.ExePath, StringComparison.OrdinalIgnoreCase))
 						existing.Source = result.ExePath;
 
+					// A Source váltása null-ra állíthatta az InstallRoot-ot, ezért UTÁNA töltjük.
+					// A régi rekordok is így kapják meg az InstallRoot-ot az első indításkor.
+					if (!string.IsNullOrEmpty(result.InstallRoot) &&
+						!string.Equals(existing.InstallRoot, result.InstallRoot, StringComparison.OrdinalIgnoreCase))
+						existing.InstallRoot = result.InstallRoot;
+
 					// A jatekot korabban torolve jeloltuk (a fajl eltunt), de a
 					// scanner most ujra megtalalta - tehat visszatoltottek.
 					if (existing.IsDeleted)
@@ -2347,63 +3139,90 @@ namespace LaunchPad.Services
 				}
 				else
 				{
-					Games.Add(new Game(
-					name: result.GameName,
-					source: result.ExePath,
-					isFavourite: false,
-					isDeleted: false,
-					sessions: null
-					));
+					var game = new Game(
+						name: result.GameName,
+						source: result.ExePath,
+						isFavourite: false,
+						isDeleted: false,
+						sessions: null);
+
+					game.InstallRoot = result.InstallRoot;
+					Games.Add(game);
 				}
 			}
 		}
 
-		private void FlushActiveSessions()
+		// -------------------------------------------------------------------
+		// TÖRLÉS / VISSZATÖLTÉS ÉSZLELÉS
+		// -------------------------------------------------------------------
+
+		private async Task RunAvailabilityCheckAsync()
 		{
-			var activeSessions = Games.Where(g => g.ActiveSession != null).ToList();
-			if (!activeSessions.Any()) return;
-			foreach (var game in activeSessions) game.FlushSession();
-			Save();
+			if (_disposed) return;
+			// Ha az előző ellenőrzés még tart (lassú / lecsatolt lemez), kihagyjuk ezt a tick-et.
+			if (Interlocked.Exchange(ref _availabilityCheckRunning, 1) == 1) return;
 
-		}
-
-		public void MarkMissingGamesAsDeleted()
-		{
-			bool anyChanged = false;
-
-			foreach (var game in Games.Where(g => !g.IsDeleted && !g.IsExcluded))
+			try
 			{
-				if (!File.Exists(game.Source))
-				{
-					game.IsDeleted = true;
-					anyChanged = true;
-				}
-			}
+				var snapshot = SnapshotForAvailability();
+				var exists = await Task.Run(() => snapshot.Select(x => File.Exists(x.Path)).ToList());
 
-			if (anyChanged) Save();
+				// Az await után a UI szálon vagyunk (DispatcherSynchronizationContext).
+				if (_disposed) return;
+				ApplyAvailability(snapshot, exists);
+			}
+			catch (Exception ex)
+			{
+				Debug.WriteLine($"[GameService] Availability check hiba: {ex.Message}");
+			}
+			finally
+			{
+				Volatile.Write(ref _availabilityCheckRunning, 0);
+			}
 		}
 
-		/// <summary>
-		/// A korabban torolve jelolt jatekokat visszaallitja, ha a Source
-		/// path-juk idokozben ujra letezik (pl. a felhasznalo visszatoltotte
-		/// ugyanoda a jatekot). Fuggetlen a FileSystemWatcher-ektol, ezert
-		/// akkor is mukodik, ha egy mappa torlese/ujraletrehozasa miatt a
-		/// watcher esemenyei elvesznek.
-		/// </summary>
-		public void RestoreReappearedGames()
+		private List<(Game Game, string Path)> SnapshotForAvailability()
 		{
-			bool anyChanged = false;
+			return Games
+				.Where(g => !g.IsExcluded)
+				.Select(g => (g, g.Source))
+				.ToList();
+		}
 
-			foreach (var game in Games.Where(g => g.IsDeleted && !g.IsExcluded))
+		private void ApplyAvailability(List<(Game Game, string Path)> snapshot, List<bool> exists)
+		{
+			for (int i = 0; i < snapshot.Count && i < exists.Count; i++)
 			{
-				if (File.Exists(game.Source))
-				{
-					game.IsDeleted = false;
-					anyChanged = true;
-				}
-			}
+				var (game, path) = snapshot[i];
 
-			if (anyChanged) Save();
+				// Közben módosult (pl. Change exe path / Exclude) -> az eredmény elavult.
+				if (game.IsExcluded) continue;
+				if (!string.Equals(game.Source, path, StringComparison.OrdinalIgnoreCase)) continue;
+
+				bool shouldBeDeleted = !exists[i];
+				if (game.IsDeleted != shouldBeDeleted)
+					game.IsDeleted = shouldBeDeleted;   // a PropertyChanged úgyis kér mentést
+			}
+		}
+
+		/// <summary>Bármely szálról hívható (a fájlellenőrzés a hívó szálon, a módosítás a UI szálon fut).</summary>
+		public void MarkMissingGamesAsDeleted() => SyncAvailabilityBlocking();
+
+		/// <summary>Bármely szálról hívható.</summary>
+		public void RestoreReappearedGames() => SyncAvailabilityBlocking();
+
+		private void SyncAvailabilityBlocking()
+		{
+			try
+			{
+				var snapshot = OnUiResult(SnapshotForAvailability);
+				var exists = snapshot.Select(x => File.Exists(x.Path)).ToList();
+				OnUi(() => ApplyAvailability(snapshot, exists));
+			}
+			catch (Exception ex)
+			{
+				Debug.WriteLine($"[GameService] SyncAvailability hiba: {ex.Message}");
+			}
 		}
 
 		public List<string> GetChangedCustomFolders(
@@ -2427,12 +3246,16 @@ namespace LaunchPad.Services
 			return changed;
 		}
 
+		// -------------------------------------------------------------------
+		// KIZÁRÁS / EXE CSERE
+		// -------------------------------------------------------------------
+
 		/// <summary>
 		/// A jatekot "kizartra" allitja: mostantol nem jelenik meg a Libraryban,
 		/// es a jelenlegi Source path-ja felkerul a kizart utak listajara, hogy
 		/// egyetlen jovobeli scan se hozza vissza/hozza letre ujra ugyanezen
 		/// az uton. Maga a rekord (statisztikak, session-ok) megmarad a
-		/// Games.json-ban.
+		/// Games.json-ban. (Az esetleg futó sessiont a monitor zárja le.)
 		/// </summary>
 		public void ExcludeGame(Game game)
 		{
@@ -2484,30 +3307,91 @@ namespace LaunchPad.Services
 			if (!alreadyThere) excluded.Add(path);
 		}
 
+		// -------------------------------------------------------------------
+		// MENTÉS
+		// -------------------------------------------------------------------
 
+		private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+		{
+			if (e.NewItems != null)
+			{
+				foreach (Game game in e.NewItems)
+					SubscribeToGame(game);
+			}
+			RequestSave();
+		}
+
+		private void SubscribeToGame(Game game)
+		{
+			game.PropertyChanged += OnGamePropertyChanged;
+		}
+
+		private void OnGamePropertyChanged(object? sender, PropertyChangedEventArgs e)
+		{
+			if (e.PropertyName != null && PersistedProperties.Contains(e.PropertyName))
+				RequestSave();
+		}
+
+		/// <summary>Késleltetett (1 mp-es debounce) mentés. Bármely szálról hívható.</summary>
+		public void RequestSave()
+		{
+			if (_disposed) return;
+
+			if (!_dispatcher.CheckAccess())
+			{
+				_dispatcher.BeginInvoke(new Action(RequestSave));
+				return;
+			}
+
+			_saveTimer.Stop();
+			_saveTimer.Start();
+		}
+
+		/// <summary>
+		/// Azonnali mentés. Bármely szálról hívható: a szerializálás mindig a UI szálon történik,
+		/// így közben egyetlen Sessions lista sem módosulhat. Hiba esetén nem dob kivételt, hanem újrapróbálja.
+		/// </summary>
 		public void Save()
 		{
-			_storage.SaveGames(Games.ToList());
+			if (!_dispatcher.CheckAccess())
+			{
+				try { _dispatcher.Invoke(new Action(Save)); }
+				catch (Exception ex) { Debug.WriteLine($"[GameService] Save marshal hiba: {ex.Message}"); }
+				return;
+			}
+
+			_saveTimer.Stop();
+
+			try
+			{
+				_storage.SaveGames(Games.ToList());
+			}
+			catch (Exception ex)
+			{
+				Debug.WriteLine($"[GameService] Mentés sikertelen, újrapróbáljuk: {ex.Message}");
+				if (!_disposed) _saveTimer.Start();
+			}
 		}
 
 		public void Dispose()
 		{
-			_safetyTimer?.Stop();
-			_safetyTimer?.Dispose();
-			_sessionFlushTimer?.Stop();
-			_sessionFlushTimer?.Dispose();
+			if (_disposed) return;
+			_disposed = true;
+
+			_availabilityTimer.Stop();
+			_saveTimer.Stop();
 		}
 	}
 }
+
 
 ===== Services\GameStorage.cs =====
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
-using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using LaunchPad.Model;
 
 namespace LaunchPad.Services
@@ -2518,6 +3402,12 @@ namespace LaunchPad.Services
 				Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
 				"LaunchPad");
 		private static readonly string FilePath = Path.Combine(DataFolder, "Games.json");
+		private static readonly string BackupPath = Path.Combine(DataFolder, "Games.json.bak");
+		private static readonly string CorruptPath = Path.Combine(DataFolder, "Games.corrupt.json");
+
+		// Mentés közben soha ne olvashasson/írhasson két szál egyszerre.
+		private static readonly object FileLock = new();
+
 		private static readonly JsonSerializerOptions Options = new JsonSerializerOptions
 		{
 			WriteIndented = true,
@@ -2526,28 +3416,267 @@ namespace LaunchPad.Services
 
 		public List<Game> LoadGames()
 		{
-			if (!File.Exists(FilePath))
+			lock (FileLock)
 			{
-				return new List<Game>();
+				if (!File.Exists(FilePath))
+					return new List<Game>();
+
+				try
+				{
+					return Parse(File.ReadAllText(FilePath));
+				}
+				catch (Exception ex)
+				{
+					Debug.WriteLine($"[GameStorage] Games.json nem olvasható: {ex.Message}");
+
+					// A sérült fájlt NEM írjuk felül észrevétlenül: elmentjük egy mellé.
+					try { File.Copy(FilePath, CorruptPath, overwrite: true); } catch { }
+
+					// Az előző jó mentés (a File.Replace által készített .bak) a tartalék.
+					if (File.Exists(BackupPath))
+					{
+						try { return Parse(File.ReadAllText(BackupPath)); }
+						catch (Exception ex2)
+						{
+							Debug.WriteLine($"[GameStorage] A .bak sem olvasható: {ex2.Message}");
+						}
+					}
+
+					return new List<Game>();
+				}
 			}
+		}
 
-			string json = File.ReadAllText(FilePath);
-
+		private static List<Game> Parse(string json)
+		{
 			if (string.IsNullOrWhiteSpace(json))
-			{
 				return new List<Game>();
-			}
 
 			return JsonSerializer.Deserialize<List<Game>>(json, Options) ?? new List<Game>();
 		}
+
+		/// <summary>
+		/// A szerializálást a hívó szálon végzi (a GameService a UI szálról hívja, így a
+		/// Sessions listák közben nem módosulhatnak), az írás pedig atomi:
+		/// előbb temp fájl, aztán csere. Egy kilövés/áramszünet nem hagyhat félig írt Games.json-t.
+		/// </summary>
 		public void SaveGames(List<Game> games)
 		{
-			Directory.CreateDirectory(DataFolder);
 			string json = JsonSerializer.Serialize(games, Options);
-			File.WriteAllText(FilePath, json);
+
+			lock (FileLock)
+			{
+				Directory.CreateDirectory(DataFolder);
+
+				string tmp = FilePath + ".tmp";
+				File.WriteAllText(tmp, json);
+
+				if (File.Exists(FilePath))
+					File.Replace(tmp, FilePath, BackupPath, ignoreMetadataErrors: true);
+				else
+					File.Move(tmp, FilePath);
+			}
 		}
 	}
 }
+
+
+===== Services\ProcessScanner.cs =====
+
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace LaunchPad.Services
+{
+	/// <summary>
+	/// Egy futó processz. A Path null, ha nem sikerült lekérdezni (pl. hozzáférés megtagadva) -
+	/// ilyenkor csak a fájlnév (ExeName) áll rendelkezésre.
+	/// </summary>
+	internal readonly record struct RunningProcess(int Pid, string ExeName, string? Path, DateTime? StartUtc);
+
+	/// <summary>
+	/// A futó processzek listája Toolhelp32 snapshotból + QueryFullProcessImageName.
+	/// Ellentétben a Process.MainModule-lal, ez emelt jogú (admin) processzekre is működik,
+	/// és nem foglal le Process objektumokat minden körben.
+	/// Az útvonalat/indulási időt (PID + exe név) alapján cache-eli.
+	/// </summary>
+	internal sealed class ProcessScanner
+	{
+		private const uint TH32CS_SNAPPROCESS = 0x00000002;
+		private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+		private const int ERROR_INSUFFICIENT_BUFFER = 122;
+
+		// Egy működő Windowson mindig van ennél több processz. Ha mégsem, a pillanatkép
+		// hibás/részleges, és NEM szabad "semmi nem fut"-ként értelmezni (különben
+		// félrevezetően lezárnánk a futó játékok sessionjeit).
+		private const int MinPlausibleProcessCount = 10;
+
+		private static readonly IntPtr InvalidHandle = new(-1);
+
+		private sealed record CacheEntry(string ExeName, string Path, DateTime? StartUtc);
+
+		private readonly object _lock = new();
+		private readonly Dictionary<int, CacheEntry> _cache = new();
+
+		/// <summary>
+		/// Kivételt dob, ha a pillanatkép nem megbízható. A hívó ilyenkor kihagyja a kört
+		/// és NEM módosít semmilyen sessiont.
+		/// </summary>
+		public List<RunningProcess> Snapshot()
+		{
+			lock (_lock)
+			{
+				IntPtr snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+				if (snapshot == InvalidHandle || snapshot == IntPtr.Zero)
+					throw new Win32Exception(Marshal.GetLastWin32Error());
+
+				var result = new List<RunningProcess>(256);
+				var alive = new HashSet<int>();
+
+				try
+				{
+					var entry = new PROCESSENTRY32W
+					{
+						dwSize = (uint)Marshal.SizeOf<PROCESSENTRY32W>()
+					};
+
+					if (!Process32FirstW(snapshot, ref entry))
+						throw new Win32Exception(Marshal.GetLastWin32Error());
+
+					do
+					{
+						int pid = (int)entry.th32ProcessID;
+						if (pid <= 4) continue; // Idle (0) és System (4)
+
+						string exeName = entry.szExeFile ?? string.Empty;
+						alive.Add(pid);
+
+						if (_cache.TryGetValue(pid, out var cached) &&
+							string.Equals(cached.ExeName, exeName, StringComparison.OrdinalIgnoreCase))
+						{
+							result.Add(new RunningProcess(pid, exeName, cached.Path, cached.StartUtc));
+							continue;
+						}
+
+						var (path, start) = QueryProcess(pid);
+
+						if (path != null)
+							_cache[pid] = new CacheEntry(exeName, path, start);
+						else
+							_cache.Remove(pid);
+
+						result.Add(new RunningProcess(pid, exeName, path, start));
+					}
+					while (Process32NextW(snapshot, ref entry));
+				}
+				finally
+				{
+					CloseHandle(snapshot);
+				}
+
+				if (result.Count < MinPlausibleProcessCount)
+					throw new InvalidOperationException($"Gyanúsan kevés processz a pillanatképben: {result.Count}");
+
+				// A már megszűnt processzek törlése a cache-ből (PID újrahasznosítás ellen is).
+				foreach (var pid in _cache.Keys.Where(k => !alive.Contains(k)).ToList())
+					_cache.Remove(pid);
+
+				return result;
+			}
+		}
+
+		private static (string? Path, DateTime? StartUtc) QueryProcess(int pid)
+		{
+			IntPtr handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, (uint)pid);
+			if (handle == IntPtr.Zero) return (null, null);
+
+			try
+			{
+				string? path = null;
+
+				var sb = new StringBuilder(1024);
+				int size = sb.Capacity;
+				if (QueryFullProcessImageNameW(handle, 0, sb, ref size))
+				{
+					path = sb.ToString(0, size);
+				}
+				else if (Marshal.GetLastWin32Error() == ERROR_INSUFFICIENT_BUFFER)
+				{
+					sb = new StringBuilder(32768);
+					size = sb.Capacity;
+					if (QueryFullProcessImageNameW(handle, 0, sb, ref size))
+						path = sb.ToString(0, size);
+				}
+
+				DateTime? start = null;
+				if (GetProcessTimes(handle, out long creation, out _, out _, out _) && creation > 0)
+				{
+					try { start = DateTime.FromFileTimeUtc(creation); }
+					catch (ArgumentOutOfRangeException) { }
+				}
+
+				return (path, start);
+			}
+			finally
+			{
+				CloseHandle(handle);
+			}
+		}
+
+		// -------------------------------------------------------------------
+		// P/Invoke
+		// -------------------------------------------------------------------
+
+		[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+		private struct PROCESSENTRY32W
+		{
+			public uint dwSize;
+			public uint cntUsage;
+			public uint th32ProcessID;
+			public UIntPtr th32DefaultHeapID;
+			public uint th32ModuleID;
+			public uint cntThreads;
+			public uint th32ParentProcessID;
+			public int pcPriClassBase;
+			public uint dwFlags;
+
+			[MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+			public string szExeFile;
+		}
+
+		[DllImport("kernel32.dll", SetLastError = true)]
+		private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+
+		[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+		private static extern bool Process32FirstW(IntPtr hSnapshot, ref PROCESSENTRY32W lppe);
+
+		[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+		private static extern bool Process32NextW(IntPtr hSnapshot, ref PROCESSENTRY32W lppe);
+
+		[DllImport("kernel32.dll", SetLastError = true)]
+		private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
+
+		[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+		private static extern bool QueryFullProcessImageNameW(IntPtr hProcess, uint dwFlags, StringBuilder lpExeName, ref int lpdwSize);
+
+		[DllImport("kernel32.dll", SetLastError = true)]
+		private static extern bool GetProcessTimes(
+			IntPtr hProcess,
+			out long lpCreationTime,
+			out long lpExitTime,
+			out long lpKernelTime,
+			out long lpUserTime);
+
+		[DllImport("kernel32.dll", SetLastError = true)]
+		[return: MarshalAs(UnmanagedType.Bool)]
+		private static extern bool CloseHandle(IntPtr hObject);
+	}
+}
+
 
 ===== Services\SettingsService.cs =====
 
@@ -2806,6 +3935,7 @@ namespace LaunchPad.View
 
 ===== View\HomeView.xaml =====
 
+
 <UserControl x:Class="LaunchPad.View.HomeView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -2847,7 +3977,9 @@ namespace LaunchPad.View
                     <Label Content="{Binding Name}" Foreground="{DynamicResource AppFontColorPrimary}" FontSize="14"/>
                     <Label Content="{Binding LastPlayedLabel}" Foreground="{DynamicResource AppFontColorPrimary}" FontWeight="ExtraLight" FontSize="10"/>
 					<Border CornerRadius="5" Background="{DynamicResource AppBorderColorPrimary}">
-						<Button Style="{StaticResource PlayButtonStyle}">
+						<Button Style="{StaticResource PlayButtonStyle}"
+								Command="{Binding DataContext.PlayCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+								CommandParameter="{Binding}">
 							<StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
 								<TextBlock Text="" FontFamily="{StaticResource IconsFill}" VerticalAlignment="Center"/>
 								<TextBlock Text=" Play"/>
@@ -4268,22 +5400,26 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.Linq;
 using System.Text;
+using CommunityToolkit.Mvvm.Input;
 using LaunchPad.Model;
 using LaunchPad.Services;
 
 namespace LaunchPad.ViewModel
 {
-	internal class HomeViewModel
+	internal partial class HomeViewModel
 	{
 		private readonly GameService _gameService;
+		private readonly GameLauncher _launcher;
 		public ObservableCollection<Game> Favourites { get; }
 
 		public int TotalGamesCount => _gameService.TotalGamesCount;
 
-		public HomeViewModel(GameService gameService)
+		public HomeViewModel(GameService gameService, GameLauncher launcher)
 		{
 			_gameService = gameService;
+			_launcher = launcher;
 			Favourites = new ObservableCollection<Game>(_gameService.Games.Where(g => g.IsFavourite));
 
 			foreach (var game in _gameService.Games)
@@ -4292,6 +5428,13 @@ namespace LaunchPad.ViewModel
 			}
 
 			_gameService.Games.CollectionChanged += OnCollectionChanged;
+		}
+
+		[RelayCommand]
+		private void Play(Game? game)
+		{
+			if (game == null) return;
+			_launcher.LaunchWithFeedback(game);
 		}
 
 		private void OnGamePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -4322,7 +5465,9 @@ namespace LaunchPad.ViewModel
 	}
 }
 
+
 ===== ViewModel\LibraryViewModel.cs =====
+
 
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
@@ -4344,6 +5489,7 @@ namespace LaunchPad.ViewModel
 		private const string ExcludedName = "Excluded";
 
 		private readonly GameService _gameService;
+		private readonly GameLauncher _launcher;
 
 		public ObservableCollection<Game> Games { get; }
 
@@ -4353,9 +5499,10 @@ namespace LaunchPad.ViewModel
 		// SOURCE csoport: Steam / Epic / ...
 		public FilterGroup SourceFilter { get; }
 
-		public LibraryViewModel(GameService gameService)
+		public LibraryViewModel(GameService gameService, GameLauncher launcher)
 		{
 			_gameService = gameService;
+			_launcher = launcher;
 
 			// Alapból csak az "Every game" chip van kijelölve
 			ShowFilter = new FilterGroup(
@@ -4374,6 +5521,13 @@ namespace LaunchPad.ViewModel
 				game.PropertyChanged += OnGamePropertyChanged;
 
 			_gameService.Games.CollectionChanged += OnCollectionChanged;
+		}
+
+		[RelayCommand]
+		private void LaunchGame(Game? game)
+		{
+			if (game == null) return;
+			_launcher.LaunchWithFeedback(game);
 		}
 
 		private bool IsVisible(Game game)
@@ -4478,6 +5632,7 @@ namespace LaunchPad.ViewModel
 		}
 	}
 }
+
 
 ===== ViewModel\MacrosViewModel.cs =====
 

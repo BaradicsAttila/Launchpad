@@ -1,4 +1,5 @@
-﻿using System;
+
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -176,11 +177,7 @@ namespace LaunchPad.Services
 
 		private void MarkGameAsDeletedByPath(string path)
 		{
-			var game = _gameService.Games.FirstOrDefault(g =>
-				string.Equals(g.Source, path, StringComparison.OrdinalIgnoreCase));
-
-			if (game != null && !game.IsDeleted)
-				game.IsDeleted = true;
+			SetDeletedStateOnUi(path, isDeleted: true);
 		}
 
 		// Ha ugyanoda (ugyanaz a mappa + fajlnev) kerul vissza az exe - pl. a
@@ -188,11 +185,24 @@ namespace LaunchPad.Services
 		// nelkul visszaallitjuk a lathato allapotot.
 		private void MarkGameAsRestoredByPath(string path)
 		{
-			var game = _gameService.Games.FirstOrDefault(g =>
-				string.Equals(g.Source, path, StringComparison.OrdinalIgnoreCase));
+			SetDeletedStateOnUi(path, isDeleted: false);
+		}
 
-			if (game != null && game.IsDeleted)
-				game.IsDeleted = false;
+		// A FileSystemWatcher esemenyei hatterszalon futnak, a Games gyujtemeny es a Game
+		// tulajdonsagai viszont (a Library/Home nezetek miatt) csak a UI szalrol modosithatok.
+		private void SetDeletedStateOnUi(string path, bool isDeleted)
+		{
+			var dispatcher = System.Windows.Application.Current?.Dispatcher;
+			if (dispatcher == null) return;
+
+			dispatcher.BeginInvoke(new Action(() =>
+			{
+				var game = _gameService.Games.FirstOrDefault(g =>
+					string.Equals(g.Source, path, StringComparison.OrdinalIgnoreCase));
+
+				if (game != null && game.IsDeleted != isDeleted)
+					game.IsDeleted = isDeleted;
+			}));
 		}
 
 		public void Dispose()

@@ -1,4 +1,5 @@
-﻿<UserControl x:Class="LaunchPad.View.HomeView"
+
+<UserControl x:Class="LaunchPad.View.HomeView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
@@ -39,7 +40,9 @@
                     <Label Content="{Binding Name}" Foreground="{DynamicResource AppFontColorPrimary}" FontSize="14"/>
                     <Label Content="{Binding LastPlayedLabel}" Foreground="{DynamicResource AppFontColorPrimary}" FontWeight="ExtraLight" FontSize="10"/>
 					<Border CornerRadius="5" Background="{DynamicResource AppBorderColorPrimary}">
-						<Button Style="{StaticResource PlayButtonStyle}">
+						<Button Style="{StaticResource PlayButtonStyle}"
+								Command="{Binding DataContext.PlayCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+								CommandParameter="{Binding}">
 							<StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
 								<TextBlock Text="" FontFamily="{StaticResource IconsFill}" VerticalAlignment="Center"/>
 								<TextBlock Text=" Play"/>

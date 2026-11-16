@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+
+using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using Microsoft.Win32;
@@ -10,6 +11,7 @@ public class GameScanResult
     public string ExePath { get; set; } = string.Empty;
     public string GameName { get; set; } = string.Empty;
     public string Source { get; set; } = string.Empty;
+    public string? InstallRoot { get; set; }
 }
 
 public class GameScanner
@@ -149,7 +151,7 @@ public class GameScanner
     /// a jatek fo exe-je, hanem valamilyen telepito/segedprogram/
     /// futtatokornyezet.
     /// </summary>
-    private static bool IsLikelyNonGameExecutable(string filePath)
+    internal static bool IsLikelyNonGameExecutable(string filePath)
     {
         var nameOnly = Path.GetFileNameWithoutExtension(filePath).ToLowerInvariant();
         if (ExcludedExeNamePatterns.Any(pattern => nameOnly.Contains(pattern)))
@@ -503,7 +505,8 @@ public class GameScanner
                     {
                         ExePath = exe.FullName,
                         GameName = name ?? installDir,
-                        Source = "Steam"
+                        Source = "Steam",
+                        InstallRoot = gamePath
                     });
                 }
                 catch (Exception ex)
@@ -618,7 +621,8 @@ public class GameScanner
                 {
                     ExePath = exePath,
                     GameName = displayName ?? Path.GetFileNameWithoutExtension(exePath),
-                    Source = "Epic"
+                    Source = "Epic",
+                    InstallRoot = installPath
                 });
             }
             catch (Exception ex)
@@ -665,7 +669,8 @@ public class GameScanner
                 {
                     ExePath = exe.FullName,
                     GameName = Path.GetFileName(gameFolder),
-                    Source = "Ubisoft"
+                    Source = "Ubisoft",
+                    InstallRoot = gameFolder
                 });
             }
             catch (Exception ex)
@@ -721,7 +726,8 @@ public class GameScanner
                     {
                         ExePath = exe.FullName,
                         GameName = Path.GetFileName(gameFolder),
-                        Source = "EA"
+                        Source = "EA",
+                        InstallRoot = gameFolder
                     });
                 }
                 catch (Exception ex)
@@ -769,7 +775,8 @@ public class GameScanner
                 {
                     ExePath = exe.FullName,
                     GameName = Path.GetFileName(gameFolder),
-                    Source = "GOG"
+                    Source = "GOG",
+                    InstallRoot = gameFolder
                 });
             }
             catch (Exception ex)
@@ -826,7 +833,8 @@ public class GameScanner
                 {
                     ExePath = exe.FullName,
                     GameName = Path.GetFileName(root),
-                    Source = "BattleNet"
+                    Source = "BattleNet",
+                    InstallRoot = root
                 });
             }
             catch (Exception ex)
@@ -890,7 +898,8 @@ public class GameScanner
             {
                 ExePath = bestExe.FullName,
                 GameName = Path.GetFileName(subDir),
-                Source = "Scan"
+                Source = "Scan",
+                InstallRoot = subDir
             };
         }
     }
@@ -1105,6 +1114,10 @@ public class GameScanner
                 var newPriority = SourcePriority.GetValueOrDefault(item.Source, 99);
                 var existingPriority = SourcePriority.GetValueOrDefault(existing.Source, 99);
 
+                // Ha a mar tarolt talalatnak nincs telepitesi mappaja, az ujabbtol atvesszuk.
+                if (string.IsNullOrEmpty(existing.InstallRoot))
+                    existing.InstallRoot = item.InstallRoot;
+
                 // New source is more trustworthy — upgrade the name
                 // The object reference in seen and target point to the same instance
                 // so mutating existing.GameName updates both automatically
@@ -1112,6 +1125,8 @@ public class GameScanner
                 {
                     existing.GameName = item.GameName;
                     existing.Source = item.Source;
+                    if (!string.IsNullOrEmpty(item.InstallRoot))
+                        existing.InstallRoot = item.InstallRoot;
                 }
             }
             else
