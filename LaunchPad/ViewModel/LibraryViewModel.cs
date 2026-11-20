@@ -1,4 +1,6 @@
 
+
+using System;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
@@ -11,7 +13,7 @@ using LaunchPad.Services;
 namespace LaunchPad.ViewModel
 {
 
-	public partial class LibraryViewModel : ObservableObject
+	public partial class LibraryViewModel : ObservableObject, IDisposable
 	{
 		private const string EveryGameName = "Every game";
 		private const string FavouritesName = "Favourites";
@@ -51,6 +53,22 @@ namespace LaunchPad.ViewModel
 				game.PropertyChanged += OnGamePropertyChanged;
 
 			_gameService.Games.CollectionChanged += OnCollectionChanged;
+		}
+
+		private bool _disposed;
+
+		/// <summary>
+		/// A nézet minden megnyitáskor új VM-et kap; ha nem szednénk le az eseménykezelőket,
+		/// a régi VM-ek örökre életben maradnának és minden játékváltozásra dolgoznának.
+		/// </summary>
+		public void Dispose()
+		{
+			if (_disposed) return;
+			_disposed = true;
+
+			_gameService.Games.CollectionChanged -= OnCollectionChanged;
+			foreach (var game in _gameService.Games)
+				game.PropertyChanged -= OnGamePropertyChanged;
 		}
 
 		[RelayCommand]
@@ -162,3 +180,5 @@ namespace LaunchPad.ViewModel
 		}
 	}
 }
+
+

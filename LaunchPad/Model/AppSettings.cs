@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -19,6 +19,12 @@ namespace LaunchPad.Model
 		public string SelectedMenuItemBackground { get; set; } = "#408A2BE2";
 		public List<string> CustomGameFolders { get; set; } = new();
 		public Dictionary<string, DateTime> CustomFolderLastScanUtc { get; set; } = new();
-        public List<string> ExcludedGamePaths { get; set; } = new();
-    }
+		public List<string> ExcludedGamePaths { get; set; } = new();
+
+		/// <summary>
+		/// Az első indításkori "custom mappák" ablak már megjelent. Enélkül, ha az első scan
+		/// nem talált semmit (Games.Count == 0), az ablak MINDEN indításkor újra feljönne.
+		/// </summary>
+		public bool FirstRunCompleted { get; set; }
+	}
 }

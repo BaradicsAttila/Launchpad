@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
@@ -44,8 +44,15 @@ namespace LaunchPad.ViewModel
 
 			var progressWindow = new ScanProgressWindow();
 			progressWindow.Show();
-			await _gameService.DeepScanAndMergeAsync(new[] { dialog.FolderName }, progressWindow);
-			progressWindow.Close();
+			try
+			{
+				await _gameService.DeepScanAndMergeAsync(new[] { dialog.FolderName }, progressWindow);
+			}
+			finally
+			{
+				// Hiba esetén sem maradhat nyitva a haladásjelző ablak.
+				progressWindow.Close();
+			}
 
 			_settingsService.Current.CustomFolderLastScanUtc[dialog.FolderName] = DateTime.UtcNow;
 			_settingsService.Save();
@@ -56,6 +63,7 @@ namespace LaunchPad.ViewModel
 		{
 			if (SelectedFolder == null) return;
 
+			_settingsService.Current.CustomFolderLastScanUtc.Remove(SelectedFolder);
 			CustomGameFolders.Remove(SelectedFolder);
 			PersistFolders();
 		}
@@ -70,8 +78,14 @@ namespace LaunchPad.ViewModel
 
 			var progressWindow = new ScanProgressWindow();
 			progressWindow.Show();
-			await _gameService.DeepScanAndMergeAsync(drives, progressWindow);
-			progressWindow.Close();
+			try
+			{
+				await _gameService.DeepScanAndMergeAsync(drives, progressWindow);
+			}
+			finally
+			{
+				progressWindow.Close();
+			}
 		}
 
 		private void PersistFolders()

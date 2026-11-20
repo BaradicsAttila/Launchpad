@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text;
@@ -15,8 +16,11 @@ namespace LaunchPad.Services
 			"LaunchPad");
 
 		private static readonly string FilePath = Path.Combine(DataFolder, "Settings.json");
+		private static readonly string CorruptPath = Path.Combine(DataFolder, "Settings.corrupt.json");
 
 		private const string DefaultTemplateResourceName = "LaunchPad.Resources.Data.Settings.json";
+
+		private static readonly object FileLock = new();
 
 		private static readonly JsonSerializerOptions Options = new JsonSerializerOptions
 		{
@@ -26,46 +30,75 @@ namespace LaunchPad.Services
 
 		public AppSettings LoadSettings()
 		{
-			if (!File.Exists(FilePath))
+			lock (FileLock)
 			{
-				SeedFromDefaultTemplate();
+				if (!File.Exists(FilePath))
+				{
+					SeedFromDefaultTemplate();
+				}
+
+				if (!File.Exists(FilePath))
+				{
+					return new AppSettings();
+				}
+
+				try
+				{
+					string json = File.ReadAllText(FilePath);
+
+					if (string.IsNullOrWhiteSpace(json))
+					{
+						return new AppSettings();
+					}
+
+					return JsonSerializer.Deserialize<AppSettings>(json, Options) ?? new AppSettings();
+				}
+				catch (Exception ex)
+				{
+					// Sérült Settings.json: az app ne omoljon össze indításkor. A hibás fájlt
+					// félretesszük (hogy ne vesszen el), és alapbeállításokkal indulunk.
+					Debug.WriteLine($"[SettingsStorage] Settings.json nem olvasható: {ex.Message}");
+					try { File.Copy(FilePath, CorruptPath, overwrite: true); } catch { }
+					return new AppSettings();
+				}
 			}
-
-			if (!File.Exists(FilePath))
-			{
-				return new AppSettings();
-			}
-
-			string json = File.ReadAllText(FilePath);
-
-			if (string.IsNullOrWhiteSpace(json))
-			{
-				return new AppSettings();
-			}
-
-			return JsonSerializer.Deserialize<AppSettings>(json, Options) ?? new AppSettings();
 		}
 
+		/// <summary>Atomi írás (temp fájl + csere): kilövés / áramszünet nem hagyhat félig írt fájlt.</summary>
 		public void SaveSettings(AppSettings settings)
 		{
-			Directory.CreateDirectory(DataFolder);
-
 			string json = JsonSerializer.Serialize(settings, Options);
-			File.WriteAllText(FilePath, json);
+
+			lock (FileLock)
+			{
+				Directory.CreateDirectory(DataFolder);
+
+				string tmp = FilePath + ".tmp";
+				File.WriteAllText(tmp, json);
+
+				if (File.Exists(FilePath))
+					File.Replace(tmp, FilePath, destinationBackupFileName: null, ignoreMetadataErrors: true);
+				else
+					File.Move(tmp, FilePath);
+			}
 		}
+
 		public AppSettings ResetToDefault()
 		{
-			Directory.CreateDirectory(DataFolder);
-
-			string? templateJson = ReadEmbeddedTemplate();
-
-			if (templateJson != null)
+			lock (FileLock)
 			{
-				File.WriteAllText(FilePath, templateJson);
-			}
-			else
-			{
-				SaveSettings(new AppSettings());
+				Directory.CreateDirectory(DataFolder);
+
+				string? templateJson = ReadEmbeddedTemplate();
+
+				if (templateJson != null)
+				{
+					File.WriteAllText(FilePath, templateJson);
+				}
+				else
+				{
+					File.WriteAllText(FilePath, JsonSerializer.Serialize(new AppSettings(), Options));
+				}
 			}
 
 			return LoadSettings();

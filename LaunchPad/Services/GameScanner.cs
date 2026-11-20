@@ -1,4 +1,5 @@
 
+
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
@@ -188,17 +189,17 @@ public class GameScanner
             // Run highest priority sources first so their names are already in seen
             // when lower priority sources find the same exe
             progress?.Report("Reading Steam manifests...");
-            var steamResults = GetFromSteam();
+            var steamResults = SafeScan(GetFromSteam, "Steam");
             Debug.WriteLine($"[RunInstantScansAsync] Steam talalatok: {steamResults.Count}");
             AddRange(results, seen, steamResults);
 
             progress?.Report("Reading Epic Games manifests...");
-            var epicResults = GetFromEpic();
+            var epicResults = SafeScan(GetFromEpic, "Epic");
             Debug.WriteLine($"[RunInstantScansAsync] Epic talalatok: {epicResults.Count}");
             AddRange(results, seen, epicResults);
 
             progress?.Report("Reading Start Menu shortcuts...");
-            var startMenuResults = GetFromStartMenu();
+            var startMenuResults = SafeScan(GetFromStartMenu, "StartMenu");
             Debug.WriteLine($"[RunInstantScansAsync] StartMenu talalatok: {startMenuResults.Count}");
             AddRange(results, seen, startMenuResults);
 
@@ -209,22 +210,22 @@ public class GameScanner
             // A metodus megmaradt lent, ha kesobb megis kellene.
 
             progress?.Report("Reading Ubisoft Connect...");
-            var ubisoftResults = GetFromUbisoft();
+            var ubisoftResults = SafeScan(GetFromUbisoft, "Ubisoft");
             Debug.WriteLine($"[RunInstantScansAsync] Ubisoft talalatok: {ubisoftResults.Count}");
             AddRange(results, seen, ubisoftResults);
 
             progress?.Report("Reading EA App...");
-            var eaResults = GetFromEA();
+            var eaResults = SafeScan(GetFromEA, "EA");
             Debug.WriteLine($"[RunInstantScansAsync] EA talalatok: {eaResults.Count}");
             AddRange(results, seen, eaResults);
 
             progress?.Report("Reading GOG Galaxy...");
-            var gogResults = GetFromGOG();
+            var gogResults = SafeScan(GetFromGOG, "GOG");
             Debug.WriteLine($"[RunInstantScansAsync] GOG talalatok: {gogResults.Count}");
             AddRange(results, seen, gogResults);
 
             progress?.Report("Reading Battle.net...");
-            var battleNetResults = GetFromBattleNet();
+            var battleNetResults = SafeScan(GetFromBattleNet, "BattleNet");
             Debug.WriteLine($"[RunInstantScansAsync] BattleNet talalatok: {battleNetResults.Count}");
             AddRange(results, seen, battleNetResults);
 
@@ -253,10 +254,18 @@ public class GameScanner
 
                 progress?.Report($"Scanning {folder}...");
 
-                foreach (var result in EnumerateSafe(folder))
+                try
                 {
-                    AddRange(results, seen, new List<GameScanResult> { result });
-                    progress?.Report($"Found: {result.GameName}");
+                    foreach (var result in EnumerateSafe(folder))
+                    {
+                        AddRange(results, seen, new List<GameScanResult> { result });
+                        progress?.Report($"Found: {result.GameName}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Egy elérhetetlen mappa ne állítsa le az egész szkennelést.
+                    Debug.WriteLine($"[ScanFoldersAsync] HIBA a(z) {folder} szkennelésekor: {ex.Message}");
                 }
             }
 
@@ -286,6 +295,9 @@ public class GameScanner
                 @"Microsoft\Windows\Start Menu\Programs")
         };
 
+        // Egyetlen WScript.Shell példány az összes parancsikonhoz (nem pedig .lnk-nként újat).
+        var shell = CreateShell();
+
         foreach (var root in roots)
         {
             Debug.WriteLine($"[GetFromStartMenu] Mappa: {root} | letezik: {Directory.Exists(root)}");
@@ -298,7 +310,7 @@ public class GameScanner
             {
                 try
                 {
-                    var target = ResolveShortcut(lnk);
+                    var target = ResolveShortcut(shell, lnk);
 
                     if (string.IsNullOrEmpty(target)) continue;
                     if (!target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
@@ -337,26 +349,46 @@ public class GameScanner
     /// Resolves a .lnk shortcut file to its target path.
     /// Uses the built-in WScript.Shell COM object — no NuGet package needed.
     /// </summary>
-    private static string? ResolveShortcut(string lnkPath)
+    private static object? CreateShell()
     {
         try
         {
-            var shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!);
-            var shortcut = shell!.GetType().InvokeMember(
-                "CreateShortcut",
-                System.Reflection.BindingFlags.InvokeMethod,
-                null, shell, new object[] { lnkPath });
-
-            var target = shortcut!.GetType().InvokeMember(
-                "TargetPath",
-                System.Reflection.BindingFlags.GetProperty,
-                null, shortcut, null) as string;
-
-            return target;
+            var type = Type.GetTypeFromProgID("WScript.Shell");
+            return type == null ? null : Activator.CreateInstance(type);
         }
         catch
         {
             return null;
+        }
+    }
+
+    private static string? ResolveShortcut(object? shell, string lnkPath)
+    {
+        if (shell == null) return null;
+
+        object? shortcut = null;
+        try
+        {
+            shortcut = shell.GetType().InvokeMember(
+                "CreateShortcut",
+                System.Reflection.BindingFlags.InvokeMethod,
+                null, shell, new object[] { lnkPath });
+
+            if (shortcut == null) return null;
+
+            return shortcut.GetType().InvokeMember(
+                "TargetPath",
+                System.Reflection.BindingFlags.GetProperty,
+                null, shortcut, null) as string;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            if (shortcut != null && System.Runtime.InteropServices.Marshal.IsComObject(shortcut))
+                System.Runtime.InteropServices.Marshal.ReleaseComObject(shortcut);
         }
     }
 
@@ -523,35 +555,58 @@ public class GameScanner
     {
         var libraries = new List<string>();
 
-        var defaultSteam = @"C:\Program Files (x86)\Steam";
-        Debug.WriteLine($"[FindSteamLibraries] Alapertelmezett Steam mappa letezik: {Directory.Exists(defaultSteam)} ({defaultSteam})");
+        // Duplikátum nélkül (a libraryfolders.vdf az alap Steam mappát is felsorolja),
+        // különben kétszer szkennelnénk és két FileSystemWatcher figyelné ugyanazt.
+        void AddLibrary(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            try
+            {
+                var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.Trim()));
+                if (Directory.Exists(full) && !libraries.Contains(full, StringComparer.OrdinalIgnoreCase))
+                    libraries.Add(full);
+            }
+            catch { }
+        }
 
-        if (Directory.Exists(defaultSteam))
-            libraries.Add(defaultSteam);
-
-        // Steam stores all library paths in this file
-        // This handles users who have games on D:\, E:\, etc.
-        var vdfPath = Path.Combine(defaultSteam, @"steamapps\libraryfolders.vdf");
-        Debug.WriteLine($"[FindSteamLibraries] libraryfolders.vdf letezik: {File.Exists(vdfPath)} ({vdfPath})");
-
-        if (!File.Exists(vdfPath)) return libraries;
-
+        // A Steam nem feltétlenül az alap helyen van: a registry tudja a valódi útvonalat.
         try
         {
-            foreach (var line in File.ReadAllLines(vdfPath))
-            {
-                // Lines look like:   "path"    "D:\\Games\\Steam"
-                if (!line.TrimStart().StartsWith("\"path\"")) continue;
-
-                var path = line.Split('"')[3].Replace(@"\\", @"\");
-                Debug.WriteLine($"[FindSteamLibraries] vdf-ben talalt path: {path} | letezik: {Directory.Exists(path)}");
-                if (Directory.Exists(path))
-                    libraries.Add(path);
-            }
+            AddLibrary(Registry.GetValue(@"HKEY_CURRENT_USER\Software\Valve\Steam", "SteamPath", null) as string);
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[FindSteamLibraries] HIBA a vdf feldolgozasakor: {ex}");
+            Debug.WriteLine($"[FindSteamLibraries] Registry hiba: {ex.Message}");
+        }
+
+        AddLibrary(@"C:\Program Files (x86)\Steam");
+        Debug.WriteLine($"[FindSteamLibraries] Steam gyökér(ek): {string.Join(", ", libraries)}");
+
+        // A libraryfolders.vdf az összes library útvonalát tartalmazza (D:\, E:\ stb.).
+        foreach (var steamRoot in libraries.ToList())
+        {
+            var vdfPath = Path.Combine(steamRoot, "steamapps", "libraryfolders.vdf");
+            if (!File.Exists(vdfPath)) continue;
+
+            try
+            {
+                foreach (var line in File.ReadAllLines(vdfPath))
+                {
+                    // Sorok: "path"    "D:\\Games\\Steam"
+                    if (!line.TrimStart().StartsWith("\"path\"")) continue;
+
+                    var parts = line.Split('"');
+                    if (parts.Length < 4) continue;
+
+                    var path = parts[3].Replace(@"\\", @"\");
+                    Debug.WriteLine($"[FindSteamLibraries] vdf-ben talalt path: {path} | letezik: {Directory.Exists(path)}");
+                    AddLibrary(path);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[FindSteamLibraries] HIBA a vdf feldolgozasakor: {ex}");
+            }
         }
 
         return libraries;
@@ -577,7 +632,7 @@ public class GameScanner
             try
             {
                 var json = File.ReadAllText(file);
-                var doc = JsonDocument.Parse(json);
+                using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
 
                 var installPath = root.TryGetProperty("InstallLocation", out var loc)
@@ -864,12 +919,7 @@ public class GameScanner
         // Kozvetlenul a gyoker alatt levo exe-k - ha valaki egy mappaba
         // egyetlen exe-t masol be (portable jatek almappa nelkul), azt is
         // onallo talalatkent vegyuk fel.
-        IEnumerable<string> rootFiles = Enumerable.Empty<string>();
-        try { rootFiles = Directory.EnumerateFiles(root, "*.exe"); }
-        catch (UnauthorizedAccessException) { }
-        catch (IOException) { }
-
-        foreach (var f in rootFiles)
+        foreach (var f in SafeEnumerateFiles(root))
         {
             if (IsLikelyNonGameExecutable(f)) continue;
             yield return new GameScanResult
@@ -882,12 +932,7 @@ public class GameScanner
 
         // Minden kozvetlen almappa = egy jatek. Csak a legvalloszinubb fo
         // exe-t vesszuk fel belole, nem a mappafaban talalhato OSSZES exe-t.
-        IEnumerable<string> subDirs = Enumerable.Empty<string>();
-        try { subDirs = Directory.EnumerateDirectories(root); }
-        catch (UnauthorizedAccessException) { }
-        catch (IOException) { }
-
-        foreach (var subDir in subDirs)
+        foreach (var subDir in SafeEnumerateDirectories(root))
         {
             if (ShouldExclude(subDir)) continue;
 
@@ -934,28 +979,21 @@ public class GameScanner
             .File;
     }
 
-    private static void CollectExeCandidates(string folder, List<FileInfo> candidates)
+    private const int MaxExeSearchDepth = 8;
+
+    private static void CollectExeCandidates(string folder, List<FileInfo> candidates, int depth = 0)
     {
+        if (depth > MaxExeSearchDepth) return;
         if (ShouldExclude(folder)) return;
 
-        IEnumerable<string> files = Enumerable.Empty<string>();
-        try { files = Directory.EnumerateFiles(folder, "*.exe"); }
-        catch (UnauthorizedAccessException) { }
-        catch (IOException) { }
-
-        foreach (var f in files)
+        foreach (var f in SafeEnumerateFiles(folder))
         {
             if (IsLikelyNonGameExecutable(f)) continue;
             candidates.Add(new FileInfo(f));
         }
 
-        IEnumerable<string> dirs = Enumerable.Empty<string>();
-        try { dirs = Directory.EnumerateDirectories(folder); }
-        catch (UnauthorizedAccessException) { }
-        catch (IOException) { }
-
-        foreach (var dir in dirs)
-            CollectExeCandidates(dir, candidates);
+        foreach (var dir in SafeEnumerateDirectories(folder))
+            CollectExeCandidates(dir, candidates, depth + 1);
     }
 
     // Kulcsszavak, amik a beagyazott ProductName/FileDescription metaadatban
@@ -1079,8 +1117,33 @@ public class GameScanner
         }
     }
 
+    // Ezek a mappák SOHA nem játékok (a C:\ mélyszkennelésnél a Users és a ProgramData
+    // közvetlen almappaként "játéknak" látszana, és az alattuk futó rendszerfolyamatok
+    // miatt a játék sessionje sosem záródna le).
+    private static readonly HashSet<string> NeverGameFolders = BuildNeverGameFolders();
+
+    private static HashSet<string> BuildNeverGameFolders()
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string? path)
+        {
+            if (!string.IsNullOrWhiteSpace(path))
+                set.Add(Path.TrimEndingDirectorySeparator(path));
+        }
+
+        Add(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)); // C:\ProgramData
+
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrEmpty(profile))
+            Add(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(profile)));      // C:\Users
+
+        return set;
+    }
+
     private static bool ShouldExclude(string path)
     {
+        if (NeverGameFolders.Contains(Path.TrimEndingDirectorySeparator(path))) return true;
         if (ExcludedFolders.Contains(path)) return true;
         if (IsUnderExcludedRoot(path)) return true;
 
@@ -1096,6 +1159,51 @@ public class GameScanner
     // -------------------------------------------------------------------------
     // HELPERS
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Egy gyors scanner futtatása úgy, hogy a hibája ne vigye magával a többit
+    /// (és az App.OnStartup-ot sem).
+    /// </summary>
+    private static List<GameScanResult> SafeScan(Func<List<GameScanResult>> scanner, string name)
+    {
+        try
+        {
+            return scanner();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[SafeScan] {name} scanner hiba: {ex}");
+            return new List<GameScanResult>();
+        }
+    }
+
+    // A Directory.EnumerateFiles(path, pattern) alapértelmezésben DOBJA a UnauthorizedAccessException-t
+    // (pl. D:\System Volume Information), és ez nem a hívásnál, hanem a foreach-nél derül ki -
+    // ezért a try/catch-nek az ENUMERÁLÁST kell körbevennie. A rejtett/rendszer mappákat kihagyjuk.
+    private static readonly EnumerationOptions SafeEnumOptions = new()
+    {
+        IgnoreInaccessible = true,
+        RecurseSubdirectories = false,
+        AttributesToSkip = FileAttributes.Hidden | FileAttributes.System,
+    };
+
+    private static List<string> SafeEnumerateFiles(string folder)
+    {
+        try { return Directory.EnumerateFiles(folder, "*.exe", SafeEnumOptions).ToList(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new List<string>();
+        }
+    }
+
+    private static List<string> SafeEnumerateDirectories(string folder)
+    {
+        try { return Directory.EnumerateDirectories(folder, "*", SafeEnumOptions).ToList(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new List<string>();
+        }
+    }
 
     /// <summary>
     /// Adds results to the list, deduplicating by exe path.
@@ -1137,3 +1245,5 @@ public class GameScanner
         }
     }
 }
+
+

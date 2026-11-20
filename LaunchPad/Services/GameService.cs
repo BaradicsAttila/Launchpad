@@ -1,3 +1,5 @@
+
+using LaunchPad.Helpers;
 using LaunchPad.Model;
 using System;
 using System.Collections.Generic;
@@ -137,9 +139,16 @@ namespace LaunchPad.Services
 				// Kizart jatekokat nev alapjan sem "elesztunk fel" automatikusan -
 				// ha ugyanaz a nev egy UJ path-on bukkan fel, az egy uj bejegyzes
 				// lesz, nem irja felul a mar kizart regi rekordot.
-				var existing = Games.FirstOrDefault(g =>
-					!g.IsExcluded &&
-					string.Equals(g.Name, result.GameName, StringComparison.OrdinalIgnoreCase));
+				// ELŐSZÖR az exe útvonala alapján keresünk: ugyanarra az exe-re (pl. Start Menü
+				// "XAMPP Control Panel" és mélyszken "xampp") sosem jöhet létre két bejegyzés.
+				// Csak ha ilyen nincs, jön a név szerinti egyeztetés.
+				var existing =
+					Games.FirstOrDefault(g =>
+						!g.IsExcluded &&
+						string.Equals(g.Source, result.ExePath, StringComparison.OrdinalIgnoreCase))
+					?? Games.FirstOrDefault(g =>
+						!g.IsExcluded &&
+						string.Equals(g.Name, result.GameName, StringComparison.OrdinalIgnoreCase));
 
 				if (existing != null)
 				{
@@ -170,6 +179,77 @@ namespace LaunchPad.Services
 					Games.Add(game);
 				}
 			}
+		}
+
+		// -------------------------------------------------------------------
+		// DUPLIKÁTUMOK ÖSSZEVONÁSA
+		// -------------------------------------------------------------------
+
+		/// <summary>
+		/// Az ugyanarra az exe-re mutató bejegyzéseket egybe olvasztja (a régi mentésekben
+		/// maradt duplikátumokra). A sessionök egyesülnek, a kedvenc jelölés és az InstallRoot megmarad.
+		/// A GameProcessMonitor.Start() ELŐTT hívandó, a UI szálról. Visszaadja a megszüntetett bejegyzések számát.
+		/// </summary>
+		public int RemoveDuplicateGames()
+		{
+			if (!_dispatcher.CheckAccess())
+				return OnUiResult(RemoveDuplicateGames);
+
+			var groups = Games
+				.Where(g => !g.IsExcluded && !string.IsNullOrWhiteSpace(g.Source))
+				.GroupBy(g => PathHelper.NormalizeFile(g.Source) ?? g.Source, StringComparer.OrdinalIgnoreCase)
+				.Where(group => group.Count() > 1)
+				.ToList();
+
+			int removed = 0;
+
+			foreach (var group in groups)
+			{
+				var list = group.ToList();
+
+				// Kedvenc / több session nyer; egyenlőségnél a listában korábbi (a rendezés stabil).
+				var keeper = list
+					.OrderByDescending(g => g.IsFavourite)
+					.ThenByDescending(g => g.Sessions.Count)
+					.First();
+
+				foreach (var other in list.Where(g => !ReferenceEquals(g, keeper)))
+				{
+					MergeInto(keeper, other);
+					Games.Remove(other);
+					removed++;
+				}
+			}
+
+			if (removed > 0) Save();
+			return removed;
+		}
+
+		private static void MergeInto(Game keeper, Game other)
+		{
+			if (other.IsFavourite) keeper.IsFavourite = true;
+
+			if (string.IsNullOrEmpty(keeper.InstallRoot) && !string.IsNullOrEmpty(other.InstallRoot))
+				keeper.InstallRoot = other.InstallRoot;
+
+			foreach (var session in other.Sessions)
+			{
+				// Ugyanaz a futás, ha a kezdés (közel) azonos - ekkor nem számoljuk kétszer.
+				var same = keeper.Sessions.FirstOrDefault(k =>
+					Math.Abs((k.StartedAt - session.StartedAt).TotalSeconds) < 2);
+
+				if (same == null)
+				{
+					keeper.Sessions.Add(session);
+				}
+				else
+				{
+					if (session.EndedAt > same.EndedAt) same.EndedAt = session.EndedAt;
+					same.IsOpen = same.IsOpen || session.IsOpen;
+				}
+			}
+
+			keeper.Sessions.Sort((a, b) => a.StartedAt.CompareTo(b.StartedAt));
 		}
 
 		// -------------------------------------------------------------------
@@ -308,6 +388,11 @@ namespace LaunchPad.Services
 		{
 			var oldPath = game.Source;
 
+			// A felhasználó most kifejezetten ezt az exe-t választotta: ha korábban kizárt
+			// útvonal volt (pl. visszaváltás az eredeti exe-re), vegyük le a tiltólistáról.
+			_settingsService.Current.ExcludedGamePaths.RemoveAll(p =>
+				string.Equals(p, newExePath, StringComparison.OrdinalIgnoreCase));
+
 			if (!string.Equals(oldPath, newExePath, StringComparison.OrdinalIgnoreCase))
 				AddExcludedPath(oldPath);
 
@@ -337,6 +422,11 @@ namespace LaunchPad.Services
 			{
 				foreach (Game game in e.NewItems)
 					SubscribeToGame(game);
+			}
+			if (e.OldItems != null)
+			{
+				foreach (Game game in e.OldItems)
+					game.PropertyChanged -= OnGamePropertyChanged;
 			}
 			RequestSave();
 		}
@@ -403,3 +493,5 @@ namespace LaunchPad.Services
 		}
 	}
 }
+
+

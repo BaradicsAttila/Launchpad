@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -15,6 +16,8 @@ namespace LaunchPad.View
         public TitleBar()
         {
             InitializeComponent();
+            Loaded += (_, _) =>
+                (DataContext as LaunchPad.ViewModel.TitlebarVM)?.AttachWindow(Window.GetWindow(this));
         }
 
         private Point mouseDownPos;
@@ -92,3 +95,5 @@ namespace LaunchPad.View
 		}
 	}
 }
+
+

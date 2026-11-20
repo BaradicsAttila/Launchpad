@@ -1,4 +1,5 @@
-﻿using System;
+
+using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -59,10 +60,11 @@ namespace LaunchPad.Helpers
 		private static ImageSource? GetShellIcon(string exePath, int size)
 		{
 			IntPtr hBitmap = IntPtr.Zero;
+			IShellItemImageFactory? factory = null;
 			try
 			{
 				var iid = IID_ShellItemImageFactory;
-				SHCreateItemFromParsingName(exePath, IntPtr.Zero, ref iid, out var factory);
+				SHCreateItemFromParsingName(exePath, IntPtr.Zero, ref iid, out factory);
 
 				int hr = factory.GetImage(new SIZE(size, size),
 										  SIIGBF.IconOnly | SIIGBF.BiggerSizeOk,
@@ -87,6 +89,7 @@ namespace LaunchPad.Helpers
 			finally
 			{
 				if (hBitmap != IntPtr.Zero) DeleteObject(hBitmap);
+				if (factory != null) Marshal.ReleaseComObject(factory);
 			}
 		}
 
@@ -107,3 +110,4 @@ namespace LaunchPad.Helpers
 		}
 	}
 }
+

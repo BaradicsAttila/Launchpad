@@ -1,4 +1,5 @@
-﻿using System;
+
+using System;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -48,13 +49,24 @@ namespace LaunchPad.ViewModel
 
         public TitlebarVM()
         {
-            mainwindow = Application.Current?.MainWindow;
+        }
+
+        /// <summary>
+        /// A TitleBar Loaded eseményéből hívjuk. Az Application.Current.MainWindow a VM
+        /// létrehozásakor még nem feltétlenül a valódi főablak (a scan/setup ablakok előbb
+        /// jönnek létre), ezért a tényleges ablakot a vizuális fából kérjük le.
+        /// </summary>
+        public void AttachWindow(Window? window)
+        {
+            if (window == null || ReferenceEquals(mainwindow, window)) return;
+
             if (mainwindow != null)
-            {
-                UpdateMaximBtnContent();   
-                _windowSt = mainwindow.WindowState;
-                mainwindow.StateChanged += Mainwindow_StateChanged;
-            }
+                mainwindow.StateChanged -= Mainwindow_StateChanged;
+
+            mainwindow = window;
+            WindowSt = window.WindowState;
+            UpdateMaximBtnContent();
+            window.StateChanged += Mainwindow_StateChanged;
         }
 
         private void Mainwindow_StateChanged(object? sender, EventArgs e)
@@ -70,3 +82,4 @@ namespace LaunchPad.ViewModel
 
 	}
 }
+
