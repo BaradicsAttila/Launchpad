@@ -283,9 +283,13 @@
 			</Style.Triggers>
 		</Style>
         <DataTemplate x:Key="GameCardTemplate">
-			<Border>
-
-			</Border>
+            <Border CornerRadius="10" Margin="5" Background="{DynamicResource AppBackgroundPrimary}" Height="80" BorderBrush="{DynamicResource AppBorderColorSecondary}">
+                <DockPanel>
+                    <Image HorizontalAlignment="Left" Margin="5" Source="{Binding Icon}"/>
+                    <TextBlock Margin="10" VerticalAlignment="Center" Text="{Binding Name}"/>
+                    <Button Margin="15" HorizontalAlignment="Right" Width="100" Content="Play"/>
+                </DockPanel>
+            </Border>
 		</DataTemplate>
 	</UserControl.Resources>
 	<Grid>
@@ -495,16 +499,13 @@
 
 			</StackPanel>
 		</Grid>
-        <!--<ItemsControl ItemsSource="{Binding Games}" ItemTemplate="{StaticResource GameCardTemplate}">
-            <ItemsControl.ItemsPanel>
-                <ItemsPanelTemplate>
-                    <ScrollViewer>
-						<StackPanel/>
-                        
-                    </ScrollViewer>
-                </ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
-            
-        </ItemsControl>-->
-	</Grid>
+        <ScrollViewer
+              Grid.Row="2"
+              VerticalScrollBarVisibility="Hidden"
+              HorizontalScrollBarVisibility="Disabled"
+              Margin="20 20 20 20">
+            <ItemsControl ItemsSource="{Binding Games}"
+                  ItemTemplate="{StaticResource GameCardTemplate}"/>
+        </ScrollViewer>
+    </Grid>
 </UserControl>
